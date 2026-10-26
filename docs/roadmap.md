@@ -16,8 +16,8 @@ Phase 5 can start any time after phase 1 if an INT ring is wanted early.
 
 ## Decisions needed
 
-1. **Auth provider** — `next-auth` (as jobshout.com uses) vs Workstation SSO.
-   Modules already depend only on `src/shared/auth`.
+1. **Auth provider** — proposed: OpsAPI auth (the Workstation pattern; no shared
+   SSO exists). Modules already depend only on `src/shared/auth`.
 2. **Backend shape** — keep the API in Next.js route handlers (current plan; the
    heavy lifting happens in JobShout/NebulaDB) vs a separate service once
    recruiter workflows grow.

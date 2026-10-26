@@ -74,12 +74,34 @@ src/
 
 | Concern | Now | Planned |
 |---------|-----|---------|
-| Authentication | `Session`/`Role` types, `getSession()` → null, `hasRole()` | Provider TBD (next-auth or Workstation SSO); middleware guarding recruiter/candidate routes |
+| Authentication | `Session`/`Role` types, `getSession()` → null, `hasRole()` | OpsAPI auth (`/auth/*`, `/api/v2/register`) via `@opsapi/client`, token in an httpOnly cookie; middleware guarding recruiter/candidate routes |
 | API layer | Response envelope, health, 501 chat stub | Per-module route handlers, input validation, rate limiting |
-| Database | Domain types per module (`types.ts`) | Postgres + migrations (JobShout rule: idempotent `IF NOT EXISTS`) |
+| Database | Domain types per module (`types.ts`) | OpsAPI Postgres as system of record (ATS, CMS, CRM) + Workerra project plugin (below); NebulaDB for search/matching/chat only |
 | Logging | JSON logs, level per ring, redaction | Request IDs; Langfuse for AI calls |
 | Security | Static headers, no `X-Powered-By`, non-prod `robots.txt` disallow, secrets server-only | CSP with nonces, CSRF on mutations, rate limiting, PII handling for CVs |
 | Testing | Vitest unit tests (config, logger, API, modules, routes exist) | Playwright e2e against INT |
+
+## OpsAPI integration
+
+OpsAPI is a SaaS product Workerra consumes; the OpsAPI repo is never changed
+from here (only its SDK, `@opsapi/client`, when it lacks something). Pattern
+taken from `bwalia/diy-tax-return-uk` `migrations/opsapi/`:
+
+- **Calls:** `@opsapi/client` from server code only, with a `workerra` namespace
+  and a module-scoped `opsk_` API key from WSL Vault.
+- **Schema:** `migrations/opsapi/` in this repo (`project.lua` + `migrations/*.lua`,
+  each `function(schema, db)`), tracked in OpsAPI's `project_migrations` under
+  Workerra's project code. Tables start with `workerra_`; every migration is
+  idempotent; OpsAPI-owned tables (users, roles, namespaces, modules, ...) are
+  never altered.
+- **Custom endpoints:** the same plugin's `api/*.lua`, mounted by OpsAPI's
+  project loader under `/api/v2/workerra/*` (it refuses to replace core routes).
+  Their types come from the server's `/openapi.json`.
+- **Delivery:** an image `FROM bwalia/opsapi:<tag>` that copies the plugin to
+  `/app/projects/workerra/` and runs `helper.project-migrator` as a Helm
+  pre-upgrade hook after OpsAPI's own migrations.
+- **Known SDK gap:** `@opsapi/client` 1.3.0 has no ATS paths (generated against a
+  server without the `ats` feature). Regenerate the SDK with `ats` enabled.
 
 ## Configuration
 
