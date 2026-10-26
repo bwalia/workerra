@@ -1,0 +1,83 @@
+# Local check of Workerra's OpsAPI plugin against a throwaway database.
+# See migrations/opsapi/README.md. Nothing here talks to INT or any shared OpsAPI.
+#
+#   postgres            pgvector Postgres (OpsAPI's migrations need pgvector + pgcrypto)
+#   opsapi-migrate      OpsAPI's own migrations, every module (PROJECT_CODE=all, as INT)
+#   workerra-migrations Workerra's plugin migrations (Dockerfile.migrations)
+#   psql                ad-hoc queries: `run --rm psql -c "..."`
+name: workerra-opsapi
+
+x-db-env: &db-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: pguser
+  POSTGRES_PASSWORD: local-only-not-a-secret
+  POSTGRES_DB: opsapi
+  POSTGRES_SSL: "false"
+  LAPIS_ENVIRONMENT: production
+  # config.lua refuses to load without one; never used to sign anything here.
+  JWT_SECRET_KEY: local-only-not-a-secret
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg14
+    environment:
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: local-only-not-a-secret
+      POSTGRES_DB: opsapi
+    healthcheck:
+      # TCP, not the socket: the image's first-boot init server is socket-only.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U pguser -d opsapi"]
+      interval: 2s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  opsapi-migrate:
+    image: docker.io/bwalia/opsapi:${OPSAPI_TAG:-latest}
+    # OpsAPI publishes amd64 only; Apple Silicon runs it under emulation.
+    platform: linux/amd64
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *db-env
+      PROJECT_CODE: all
+    working_dir: /app
+    command:
+      - sh
+      - -euc
+      - |
+        PGPASSWORD=$$POSTGRES_PASSWORD psql -h postgres -U pguser -d opsapi -qc "CREATE EXTENSION IF NOT EXISTS pgcrypto" 2>/dev/null \
+          || echo "(psql not in image; relying on migrations to create pgcrypto)"
+        lapis migrate
+
+  workerra-migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrations
+      args:
+        OPSAPI_TAG: ${OPSAPI_TAG:-latest}
+    image: workerra-opsapi-migrations:local
+    platform: linux/amd64
+    depends_on:
+      opsapi-migrate: { condition: service_completed_successfully }
+    environment:
+      <<: *db-env
+      PROJECT_CODE: all
+    working_dir: /app
+    command:
+      - lapis
+      - exec
+      - "require('helper.project-migrator').migrate('workerra', '/app/projects/workerra')"
+
+  psql:
+    image: pgvector/pgvector:pg14
+    profiles: [tools]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGPASSWORD: local-only-not-a-secret
+    entrypoint: ["psql", "-h", "postgres", "-U", "pguser", "-d", "opsapi"]
+
+volumes:
+  pgdata:

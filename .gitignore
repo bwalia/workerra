@@ -21,3 +21,6 @@ playwright-report/
 .DS_Store
 *.log
 npm-debug.log*
+
+# local tooling (Serena MCP project state)
+.serena/
