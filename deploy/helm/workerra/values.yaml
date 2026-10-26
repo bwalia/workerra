@@ -1,0 +1,48 @@
+# Base defaults for the Workerra chart. Per-ring overlays: values-<ring>.yaml.
+# Installed as release `workerra` into the shared ring namespaces
+# (int/test/acc/prod), like jobshout-com and closeknitty.
+#
+# No credential is ever set here (the repo is public). Every secret comes from
+# WSL Vault (https://vault.workstation.co.uk, KV v2 mount `kv`) through the
+# wslvault-backend ClusterSecretStore. See docs/environments.md.
+
+# Ring name, passed to the app as APP_ENV (local|int|test|acc|prod).
+env: int
+# Public host. Single source of truth for the deploy workflow's DNS and edge
+# jobs, which read it with awk: keep it a plain top-level `host: <fqdn>` line.
+host: int.workerra.uk
+
+image:
+  repository: bwalia/workerra
+  # Set by the deploy workflow: --set image.tag=<short sha>. Also exported as
+  # APP_VERSION, which /api/health reports and Ring Promoter verifies.
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+port: 3000
+
+# One ExternalSecret per entry; ESO copies every key under the Vault path into a
+# Secret named workerra-<entry>, loaded into the pod with envFrom. Vault key
+# names must equal the env var names the app reads (see .env.example).
+# The Secrets are optional in the pod: until a Vault path exists the app still
+# starts, with the integrations it guards (e.g. the assistant) reported offline.
+vaultStore: wslvault-backend
+vaultSecrets:
+  # NEBULA_API_KEY, OPSAPI_API_KEY, ...
+  core: workerra/int/core
+
+# Plain, non-secret env (e.g. in-cluster service URLs).
+extraEnv: {}
+
+ingress:
+  enabled: true
+  # TLS terminates on the wslproxy edge (pop0), which proxies plain HTTP to the
+  # cluster ingress by Host header, so no cert-manager/tls block here.
+  className: traefik
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+nodeSelector: {}

@@ -1,0 +1,16 @@
+{
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["@/modules/*/*", "!@/modules/*/index", "!@/modules/*/server"],
+            "message": "Import a module through its public index (e.g. '@/modules/jobs') or its server entry ('@/modules/<name>/server'), not its internals."
+          }
+        ]
+      }
+    ]
+  }
+}
