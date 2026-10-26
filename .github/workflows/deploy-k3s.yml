@@ -23,6 +23,13 @@ name: Build and deploy Workerra to k3s1
 #
 # Secrets are CI credentials only (see docs/environments.md). Runtime secrets
 # live in WSL Vault (workerra/<ring>/*) and reach the pods through External Secrets.
+#
+# SAFETY SWITCH: every job that changes something outside this repo (dns, edge,
+# build, seed, deploy) runs only when the repository variable
+# WORKERRA_DEPLOY_ENABLED is "true" (Settings → Secrets and variables → Actions →
+# Variables; GitHub compares it case-insensitively). Unset, empty or anything
+# else: only `ring` (read-only validation) and `check` (tests) run. This also
+# blocks Ring Promoter dispatches and manual runs.
 
 on:
   push:
@@ -96,6 +103,11 @@ jobs:
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
           echo "values=$VALUES" >> "$GITHUB_OUTPUT"
           echo "Ring $TARGET_ENV → $HOST ($VALUES)"
+          if [ "$(printf %s "$DEPLOY_ENABLED" | tr '[:upper:]' '[:lower:]')" != true ]; then
+            echo "::notice::Deploys are OFF (WORKERRA_DEPLOY_ENABLED is not 'true'): dns, edge, build, seed and deploy will be skipped."
+          fi
+        env:
+          DEPLOY_ENABLED: ${{ vars.WORKERRA_DEPLOY_ENABLED }}
 
   # ─── 1. Typecheck, lint, test, build ───────────────────────────────────────
   check:
@@ -118,7 +130,7 @@ jobs:
   dns:
     name: Ensure Cloudflare DNS
     needs: [ring]
-    if: github.event_name == 'push' || inputs.DEPLOYMENT_TYPE != 'build'
+    if: vars.WORKERRA_DEPLOY_ENABLED == 'true' && (github.event_name == 'push' || inputs.DEPLOYMENT_TYPE != 'build')
     runs-on: ubuntu-latest
     env:
       HOST: ${{ needs.ring.outputs.host }}
@@ -156,7 +168,7 @@ jobs:
   edge:
     name: Register wslproxy vhost
     needs: [ring, dns]
-    if: github.event_name == 'push' || inputs.DEPLOYMENT_TYPE != 'build'
+    if: vars.WORKERRA_DEPLOY_ENABLED == 'true' && (github.event_name == 'push' || inputs.DEPLOYMENT_TYPE != 'build')
     runs-on: [self-hosted, workerra]
     env:
       HOST: ${{ needs.ring.outputs.host }}
@@ -200,6 +212,7 @@ jobs:
     needs: [check, dns, edge]
     if: >-
       always()
+      && vars.WORKERRA_DEPLOY_ENABLED == 'true'
       && (github.event_name == 'push' || inputs.DEPLOYMENT_TYPE != 'deploy')
       && needs.check.result == 'success'
       && (needs.dns.result == 'success' || needs.dns.result == 'skipped')
@@ -235,7 +248,7 @@ jobs:
   seed:
     name: Seed Ring Promoter (int)
     needs: [build]
-    if: github.event_name == 'push' && needs.build.result == 'success'
+    if: vars.WORKERRA_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -270,6 +283,7 @@ jobs:
     needs: [ring, dns, edge, build]
     if: >-
       always()
+      && vars.WORKERRA_DEPLOY_ENABLED == 'true'
       && github.event_name == 'workflow_dispatch'
       && inputs.DEPLOYMENT_TYPE != 'build'
       && needs.ring.result == 'success'

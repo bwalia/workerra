@@ -48,6 +48,19 @@ Because **one image runs in every ring**, nothing ring-specific is decided at
 build time. The chart sets `APP_ENV`, `SITE_URL` and `APP_VERSION` (the image
 tag) per release. Don't use `NEXT_PUBLIC_*` for ring-specific values.
 
+### Deploy switch (off by default)
+
+The `dns`, `edge`, `build`, `seed` and `deploy` jobs only run when the repository
+variable `WORKERRA_DEPLOY_ENABLED` is `true` (GitHub compares it
+case-insensitively). Unset, empty or any other value means a push to `main`
+(and any manual or Ring Promoter run) only runs `ring` and `check`, and touches
+nothing outside the repo. `ci.yml` is not affected.
+
+- Turn on, after the setup below: *Settings → Secrets and variables → Actions →
+  Variables → New repository variable*, `WORKERRA_DEPLOY_ENABLED` = `true`.
+- Turn off: delete the variable or set it to `false`. Runs already in progress
+  are not stopped; cancel them in the Actions tab.
+
 ## One-off setup before the first INT deploy
 
 None of this is done yet.
