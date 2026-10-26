@@ -1,9 +1,7 @@
-import { notImplemented } from "@/shared/api";
-import { logger } from "@/shared/logging";
+import { handleChatPost } from "@/modules/chatbot/server";
 
-// Will proxy to the JobShout chat API (docs/chatbot-reference.md) so the
-// JobShout credential stays server-side. Not implemented in the scaffold.
-export function POST() {
-  logger.info("chat request before integration", { module: "chatbot" });
-  return notImplemented("The Workerra assistant");
-}
+// Workerra assistant: proxies to NebulaDB AI chat so the credential stays server-side.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export const POST = handleChatPost;

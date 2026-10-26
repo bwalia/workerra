@@ -8,6 +8,8 @@ export const SUGGESTED_PROMPTS: readonly SuggestedPrompt[] = [
 ];
 
 export const MAX_PROMPT_LENGTH = 2000;
+/** Past messages sent with each request (the server enforces the same cap). */
+export const MAX_HISTORY_MESSAGES = 10;
 
 /** Builds the /chat URL that carries the user's first message. */
 export function chatHref(prompt: string): string {

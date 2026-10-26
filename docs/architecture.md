@@ -49,6 +49,9 @@ src/
 - `src/app` holds routing and composition only. Logic lives in modules.
 - Other code imports a module through `@/modules/<name>` (its `index.ts`).
   ESLint (`no-restricted-imports`) rejects deep imports such as `@/modules/jobs/types`.
+- A module with server-side logic also exposes `@/modules/<name>/server`
+  (`server/index.ts`, marked `import "server-only"`) for route handlers and server
+  components. The client-safe `index.ts` never re-exports it.
 - Modules may depend on `@/shared/*` and on other modules' public index. Current
   type-level dependencies: `candidates → jobs`, `job-alerts → jobs`.
 - `shared/` never imports from `modules/`.

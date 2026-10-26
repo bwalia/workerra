@@ -4,9 +4,10 @@ AI-first jobs and recruitment platform for [workerra.uk](https://workerra.uk).
 The chatbot is the main entry point: candidates and recruiters ask in plain
 language and get routed to jobs, profiles, applications and alerts.
 
-> **Status: foundation scaffold (phase 0).** Module boundaries, placeholder
-> routes and a home page with the chatbot entry point exist. Chat backend,
-> auth, database, job board, ATS, matching, alerts and blog CMS are **not built yet**.
+> **Status: phase 1 in progress.** The assistant on `/` and `/chat` answers with
+> real AI through NebulaDB (the service behind JobShout's recruiting bot); set
+> `NEBULA_URL` to enable it. Auth, database, job board, ATS, matching, alerts and
+> blog CMS are **not built yet**, and the assistant says so rather than inventing listings.
 
 ## Quick start
 
@@ -61,7 +62,9 @@ security headers, UI primitives) lives in `src/shared/`.
 | ACC | acc.workerra.uk | Workstation VPN only |
 | PROD | www.workerra.uk | Public |
 
-Deployment is documented, not configured. See [docs/environments.md](docs/environments.md).
+The INT pipeline (`.github/workflows/deploy-k3s.yml`: Cloudflare DNS → wslproxy
+vhost → image → Ring Promoter → Helm) is written but needs one-off runner, secret
+and Vault setup before its first run. See [docs/environments.md](docs/environments.md).
 
 ## Relationship to JobShout
 

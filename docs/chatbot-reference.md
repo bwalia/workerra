@@ -74,6 +74,51 @@ Env it needs: `NEBULA_URL`, `NEBULA_API_KEY`, `OPSAPI_URL`, `OPSAPI_NAMESPACE`,
    adding career routes to the API-key allow-list. That is a JobShout change and
    should be raised there, not patched from Workerra.
 
+## Implemented in Workerra (2026-10-22)
+
+Workerra calls the same NebulaDB AI chat the dock uses; it does not run its own
+LLM framework. Scope so far is conversation only.
+
+```
+browser ──POST /api/chat {message, history}──▶ Workerra route (src/app/api/chat)
+            ◀── {data:{reply}} | {error} ──     └─ @/modules/chatbot/server (handleChatPost)
+                                                   validate → rate limit → system prompt + history
+                                                   └─ POST $NEBULA_URL/api/v1/ai/chat (Bearer NEBULA_API_KEY)
+                                                       └─ ring LLM (cluster Ollama)
+```
+
+- `src/modules/chatbot/server/`: `nebula.ts` (client ported from the dock's
+  `chat()`), `assistant.ts` (Workerra system prompt, history folding),
+  `validation.ts`, `rate-limit.ts`, `handler.ts`. Marked `server-only`.
+- `src/modules/chatbot/components/ChatPanel.tsx`: conversation on `/chat`; history
+  in `sessionStorage`, last 10 messages sent per turn (server caps the same and
+  trims to a 6,000-char budget). The home `ChatEntry` still hands off via `/chat?q=`.
+- JSON response, not SSE: NebulaDB answers non-streaming and the dock also sends the
+  whole answer in one event. Switch to `stream: true` if typing-style output is wanted.
+- Refuses NebulaDB mock answers (`is_mock: true`) instead of showing them; upstream
+  error text is logged server-side and never returned to the browser. Logs record
+  sizes, timings and model, never message text.
+- Rate limit: 20 requests/minute per client IP, in process memory (single replica).
+
+Not ported yet: semantic job/candidate matching (`/api/v1/ai/search` needs a job
+source), bucket writes, OpsAPI lead capture, apply-in-chat. Each needs a module that
+does not exist yet.
+
+### Running against a real LLM locally
+
+The ring NebulaDBs are cluster-internal (`nebuladb.<ring>.svc.cluster.local:8080`).
+Locally, run a NebulaDB from `~/projects/nebuladb` with local Ollama:
+
+```bash
+NEBULA_BIND=127.0.0.1:8090 NEBULA_API_KEYS=<local-key> \
+NEBULA_LLM_OLLAMA_URL=http://127.0.0.1:11434 NEBULA_LLM_MODEL=qwen2.5:14b-instruct \
+NEBULA_LLM_READ_TIMEOUT_SECS=180 ~/projects/nebuladb/target/debug/nebula-server
+# then in .env.local:  NEBULA_URL=http://127.0.0.1:8090  NEBULA_API_KEY=<local-key>
+```
+
+Without `NEBULA_LLM_OLLAMA_URL`, NebulaDB falls back to its mock LLM and Workerra
+reports the assistant as unavailable.
+
 ## Gaps to close while porting (do not copy as-is)
 
 - No rate limiting, abuse protection or auth on the anonymous endpoint — add

@@ -12,3 +12,20 @@ export interface SuggestedPrompt {
   label: string;
   prompt: string;
 }
+
+/** A past message sent with each request so the assistant has context. */
+export interface ChatTurn {
+  role: ChatRole;
+  content: string;
+}
+
+/** Body of POST /api/chat. */
+export interface ChatRequest {
+  message: string;
+  history?: ChatTurn[];
+}
+
+/** `data` of a successful POST /api/chat. */
+export interface ChatReply {
+  reply: string;
+}

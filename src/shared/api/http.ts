@@ -12,8 +12,8 @@ export function ok<T>(data: T, init?: ResponseInit): Response {
   return Response.json({ data } satisfies ApiResponse<T>, init);
 }
 
-export function fail(status: number, code: string, message: string): Response {
-  return Response.json({ error: { code, message } } satisfies ApiResponse<never>, { status });
+export function fail(status: number, code: string, message: string, init?: ResponseInit): Response {
+  return Response.json({ error: { code, message } } satisfies ApiResponse<never>, { ...init, status });
 }
 
 /** Placeholder for endpoints whose module is planned but not built yet. */

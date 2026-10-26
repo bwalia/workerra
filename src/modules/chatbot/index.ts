@@ -8,13 +8,13 @@ export const chatbotModule: ModuleDescriptor = {
   basePath: "/chat",
   phase: 1,
   planned: [
-    "Streaming conversation UI (ported from JobShout)",
-    "Server-side proxy to the JobShout chat API",
-    "Job search and alert intents",
+    "Job and candidate matching once listings and profiles exist",
+    "Saving job alerts from the conversation",
     "Hand-off to sign-up, CV upload and applications",
   ],
 };
 
 export { ChatEntry } from "./components/ChatEntry";
-export { MAX_PROMPT_LENGTH, SUGGESTED_PROMPTS, chatHref } from "./prompts";
+export { ChatPanel } from "./components/ChatPanel";
+export { MAX_HISTORY_MESSAGES, MAX_PROMPT_LENGTH, SUGGESTED_PROMPTS, chatHref } from "./prompts";
 export type * from "./types";
