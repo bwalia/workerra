@@ -34,7 +34,7 @@ describe("loadServerEnv", () => {
   });
 
   it("strips trailing slashes from URLs", () => {
-    const env = loadServerEnv({ NEBULA_URL: "http://nebula:8080/", NEXT_PUBLIC_SITE_URL: "http://x/" });
+    const env = loadServerEnv({ NEBULA_URL: "http://nebula:8080/", SITE_URL: "http://x/" });
     expect(env.nebula).toEqual({ url: "http://nebula:8080", apiKey: null });
     expect(env.siteUrl).toBe("http://x");
   });

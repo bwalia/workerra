@@ -1,0 +1,3 @@
+self-hosted-runner:
+  # Self-hosted runner registered on bwalia/workerra for the wslproxy and k3s APIs.
+  labels: [workerra]

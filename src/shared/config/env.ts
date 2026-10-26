@@ -36,7 +36,7 @@ export function loadServerEnv(source: Source = process.env): ServerEnv {
 
   return {
     appEnv,
-    siteUrl: stripTrailingSlash(source.NEXT_PUBLIC_SITE_URL || defaultSiteUrl),
+    siteUrl: stripTrailingSlash(source.SITE_URL || defaultSiteUrl),
     logLevel: logLevel as LogLevel,
     nebula: source.NEBULA_URL
       ? { url: stripTrailingSlash(source.NEBULA_URL), apiKey: source.NEBULA_API_KEY || null }
