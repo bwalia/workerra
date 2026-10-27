@@ -111,7 +111,8 @@ create a candidate profile, apply for a job, contact the recruitment team
   it alone decides the links (`actions`, internal paths or `mailto:` only) and quick
   replies. The model writes the text; it is told not to write URLs.
 - A job search becomes a `/jobs?q=&location=&workplace=&type=` link built from what
-  the person said across the conversation.
+  the person said in the current topic: each filter keeps its latest value, so
+  "Python jobs in London" then "what about in Leeds?" searches Python in Leeds.
 - **Guided mode:** with no `NEBULA_URL`, or a NebulaDB that only has its mock LLM,
   the assistant answers from built-in guides (`server/guide.ts`) instead of going
   offline. Local development needs no secrets. Guides are honest that listings,

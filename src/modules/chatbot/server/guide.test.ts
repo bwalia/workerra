@@ -44,4 +44,16 @@ describe("guideReply", () => {
     expect(r.reply).toContain("job search");
     expect(r.actions[0].href).toBe("/jobs?q=React&location=Leeds&workplace=remote");
   });
+
+  it("keeps earlier filters when a follow-up only changes the location", () => {
+    const history = [
+      { role: "user" as const, content: "I'm looking for a job." },
+      { role: "assistant" as const, content: "Tell me more" },
+      { role: "user" as const, content: "Remote React jobs in London" },
+      { role: "assistant" as const, content: "…" },
+    ];
+    const r = guideReply("what about in Leeds?", history, NO_EMAIL);
+    expect(r.reply).toContain("job search");
+    expect(r.actions[0].href).toBe("/jobs?q=React&location=Leeds&workplace=remote");
+  });
 });

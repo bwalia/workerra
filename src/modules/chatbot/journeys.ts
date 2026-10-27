@@ -109,54 +109,79 @@ const TYPE_WORDS: Record<string, string> = {
   internship: "internship",
 };
 
-/** Builds a /jobs search link from what the person typed, e.g. "remote React jobs in Leeds". */
-export function jobSearchHref(text: string): string {
+const ROLE_NOISE =
+  /\b(remote|hybrid|on-?site|full[- ]time|part[- ]time|contract|temporary|temp|internship|any|some|new|latest|good|local|find|show|get|help|please|now|me|my|i'?m|i|a|an|the|for|of|looking|want|need|search(ing)?|actually|instead|what|about|how)\b/gi;
+
+/** The /jobs filters one message mentions, e.g. "remote React jobs in Leeds". */
+function jobFilters(text: string): Record<string, string> {
   const lower = text.toLowerCase();
-  const params = new URLSearchParams();
+  const filters: Record<string, string> = {};
 
   // Up to four words right before "jobs"/"roles": "remote React developer jobs".
+  // The last mention with a real role wins ("I'm looking for a job. React jobs").
   // Word length is capped so a long unbroken string can't make this quadratic.
-  const role = text.match(
-    /((?:[\w'+#.-]{1,40}[ \t]+){0,3}[\w'+#.-]{1,40})[ \t]+(?:jobs?|roles?|positions?|vacancies)\b/i,
-  )?.[1];
-  if (role) {
-    const cleaned = role
-      .replace(
-        /\b(remote|hybrid|on-?site|full[- ]time|part[- ]time|contract|temporary|temp|internship|any|some|new|latest|good|local|find|show|get|help|please|now|me|my|i'?m|i|a|an|the|for|of|looking|want|need|search(ing)?)\b/gi,
-        " ",
-      )
-      .replace(/\s+/g, " ")
-      .trim();
-    if (cleaned) params.set("q", cleaned);
+  const roles = Array.from(
+    text.matchAll(/((?:[\w'+#.-]{1,40}[ \t]+){0,3}[\w'+#.-]{1,40})[ \t]+(?:jobs?|roles?|positions?|vacancies)\b/gi),
+  );
+  for (const [, role] of roles) {
+    const cleaned = role.replace(ROLE_NOISE, " ").replace(/\s+/g, " ").trim();
+    if (cleaned) filters.q = cleaned;
   }
 
   const location = text.match(/\b(?:in|near|around)[ \t]+([A-Z][A-Za-z'-]+(?:[ \t]+[A-Z][A-Za-z'-]+)?)/)?.[1];
-  if (location) params.set("location", location);
+  if (location) filters.location = location;
 
   const workplace = Array.from(new Set(Object.entries(WORKPLACE_WORDS).filter(([w]) => lower.includes(w)).map(([, v]) => v)));
-  if (workplace.length) params.set("workplace", workplace.join(","));
+  if (workplace.length) filters.workplace = workplace.join(",");
   const types = Array.from(new Set(Object.entries(TYPE_WORDS).filter(([w]) => new RegExp(`\\b${w}\\b`).test(lower)).map(([, v]) => v)));
-  if (types.length) params.set("type", types.join(","));
+  if (types.length) filters.type = types.join(",");
+  return filters;
+}
 
+/**
+ * Builds a /jobs search link from what the person typed. Given several messages
+ * (oldest first), each filter keeps its latest value: "Python jobs in London"
+ * then "what about in Leeds?" searches Python in Leeds.
+ */
+export function jobSearchHref(said: string | readonly string[]): string {
+  const merged: Record<string, string> = {};
+  for (const text of typeof said === "string" ? [said] : said) Object.assign(merged, jobFilters(text));
+  const params = new URLSearchParams();
+  for (const key of ["q", "location", "workplace", "type"]) if (merged[key]) params.set(key, merged[key]);
   const query = params.toString();
   return query ? `/jobs?${query}` : "/jobs";
 }
 
-/** Hrefs the chat may render: same-site paths (not protocol-relative "//host") or mailto:. */
+/**
+ * Hrefs the chat may render: same-site paths (not protocol-relative "//host") or mailto:.
+ * No whitespace or control characters: browsers drop tabs and newlines, so "/\t/host" is "//host".
+ */
 export function isSafeActionHref(href: string): boolean {
-  return /^\/(?![\/\\])/.test(href) || /^mailto:[^\s?&]+$/.test(href);
+  return /^\/(?![\/\\])[^\s\x00-\x1f\x7f]*$/.test(href) || /^mailto:[^\s\x00-\x1f\x7f?&]+$/.test(href);
 }
 
-/** Everything the person has said this conversation, so "and in Leeds?" keeps the earlier role. */
-export function userText(message: string, history: readonly ChatTurn[]): string {
-  return [...history.filter((t) => t.role === "user").map((t) => t.content), message].join("\n");
+/**
+ * What the person has said in the current topic, oldest first, so "and in Leeds?"
+ * keeps the earlier role. Stops at the last message that raised a different journey,
+ * so a hiring brief's location doesn't leak into a later job search.
+ */
+export function userText(message: string, history: readonly ChatTurn[]): string[] {
+  const journey = detectJourney(message, history);
+  const said = [message];
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role !== "user") continue;
+    const own = detectJourneyIn(history[i].content);
+    if (own && own !== journey) break;
+    said.unshift(history[i].content);
+  }
+  return said;
 }
 
 /**
  * Links offered for a journey. A job search carries the person's own filters
  * (`said` is everything they've said); contact gets the team's inbox when one is configured.
  */
-export function actionsFor(journey: JourneyId, said: string, { contactEmail }: { contactEmail: string | null }): ChatAction[] {
+export function actionsFor(journey: JourneyId, said: string | readonly string[], { contactEmail }: { contactEmail: string | null }): ChatAction[] {
   const actions = [...JOURNEYS[journey].actions];
   if (journey === "find_jobs") {
     const search = jobSearchHref(said);

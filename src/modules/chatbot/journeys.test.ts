@@ -65,6 +65,29 @@ describe("jobSearchHref", () => {
     expect(params.get("q")).toBe("Python developer");
     expect(params.get("location")).toBe("Leeds");
   });
+
+  const u = (content: string) => ({ role: "user" as const, content });
+  const a = (content: string) => ({ role: "assistant" as const, content });
+  const search = (message: string, history: Parameters<typeof userText>[1]) =>
+    Object.fromEntries(new URL(jobSearchHref(userText(message, history)), "http://x").searchParams);
+
+  it("keeps the role typed after the 'Find a job' starter", () => {
+    expect(search("React developer jobs in Leeds", [u("I'm looking for a job."), a("Tell me more")])).toEqual({
+      q: "React developer",
+      location: "Leeds",
+    });
+  });
+
+  it("lets a follow-up change one filter and keeps the others", () => {
+    const history = [u("Remote Python developer jobs in London"), a("…")];
+    expect(search("what about in Leeds?", history)).toEqual({ q: "Python developer", location: "Leeds", workplace: "remote" });
+    expect(search("actually Java developer jobs", history)).toEqual({ q: "Java developer", location: "London", workplace: "remote" });
+    expect(search("full-time only please", [u("part-time Python jobs"), a("…")])).toEqual({ q: "Python", type: "full_time" });
+  });
+
+  it("does not carry filters over from a different journey", () => {
+    expect(search("Nursing jobs", [u("I want to hire a Java developer in Manchester"), a("…")])).toEqual({ q: "Nursing" });
+  });
 });
 
 describe("actionsFor", () => {
@@ -95,7 +118,7 @@ describe("isSafeActionHref", () => {
     expect(isSafeActionHref(href)).toBe(true);
   });
 
-  it.each(["//evil.example", "/\\evil.example", "javascript:alert(1)", "https://evil.example", "mailto:a@x.uk?bcc=b@y.uk"])(
+  it.each(["//evil.example", "/\\evil.example", "/\t/evil.example", "/\n/evil.example", "javascript:alert(1)", "https://evil.example", "mailto:a@x.uk?bcc=b@y.uk"])(
     "refuses %s",
     (href) => {
       expect(isSafeActionHref(href)).toBe(false);
