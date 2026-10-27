@@ -27,7 +27,7 @@ export function ChatEntry() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           maxLength={MAX_PROMPT_LENGTH}
-          placeholder="Ask about jobs, your CV, or hiring…"
+          placeholder="Ask about jobs, hiring, your profile or applications…"
           className="flex-1 rounded-lg px-3 py-2 text-slate-900 outline-none placeholder:text-slate-400"
         />
         <button

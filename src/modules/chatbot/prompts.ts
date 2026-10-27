@@ -1,11 +1,8 @@
+import { JOURNEY_LIST } from "./journeys";
 import type { SuggestedPrompt } from "./types";
 
-export const SUGGESTED_PROMPTS: readonly SuggestedPrompt[] = [
-  { label: "Find jobs for me", prompt: "Find jobs that match my skills and experience." },
-  { label: "Improve my CV", prompt: "Review my CV and suggest improvements." },
-  { label: "Set up a job alert", prompt: "Alert me when new remote software jobs are posted." },
-  { label: "I'm hiring", prompt: "I'm a recruiter and want to post a job." },
-];
+/** One chip per journey: find a job, hire, create a profile, apply, contact the team. */
+export const SUGGESTED_PROMPTS: readonly SuggestedPrompt[] = JOURNEY_LIST.map((j) => ({ label: j.label, prompt: j.starter }));
 
 export const MAX_PROMPT_LENGTH = 2000;
 /** Past messages sent with each request (the server enforces the same cap). */

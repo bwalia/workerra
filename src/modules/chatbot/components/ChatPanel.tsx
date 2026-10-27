@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { isSafeActionHref } from "../journeys";
 import { MAX_HISTORY_MESSAGES, MAX_PROMPT_LENGTH, SUGGESTED_PROMPTS } from "../prompts";
-import type { ChatMessage, ChatReply, ChatRequest } from "../types";
+import type { AssistantMode, ChatAction, ChatMessage, ChatReply, ChatRequest } from "../types";
 
 // The conversation on /chat. History lives in sessionStorage (as in the JobShout
 // dock) and the last few messages go to POST /api/chat with each turn.
@@ -28,11 +30,11 @@ function saveMessages(messages: ChatMessage[]) {
   }
 }
 
-function newMessage(role: ChatMessage["role"], content: string): ChatMessage {
-  return { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString() };
+function newMessage(role: ChatMessage["role"], content: string, extras?: Pick<ChatMessage, "actions" | "suggestions">): ChatMessage {
+  return { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString(), ...extras };
 }
 
-async function requestReply(body: ChatRequest, signal: AbortSignal): Promise<string> {
+async function requestReply(body: ChatRequest, signal: AbortSignal): Promise<ChatReply> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -41,10 +43,40 @@ async function requestReply(body: ChatRequest, signal: AbortSignal): Promise<str
   });
   const json = (await res.json().catch(() => null)) as { data?: ChatReply; error?: { message?: string } } | null;
   if (!res.ok || !json?.data?.reply) throw new Error(json?.error?.message || NETWORK_ERROR);
-  return json.data.reply;
+  return json.data;
 }
 
-export function ChatPanel({ initialQuestion, enabled }: { initialQuestion?: string; enabled: boolean }) {
+const CHIP =
+  "rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-700 hover:border-brand-500 hover:text-brand-700";
+
+/**
+ * Links under an answer. Internal pages use client navigation; mailto: is a plain link.
+ * Messages are restored from sessionStorage, so hrefs are re-checked before rendering.
+ */
+function ActionLinks({ actions }: { actions: ChatAction[] }) {
+  const style = "rounded-lg border border-brand-500 px-3 py-1 text-sm font-medium text-brand-700 hover:bg-brand-50";
+  const safe = actions.filter((a) => typeof a?.href === "string" && isSafeActionHref(a.href));
+  if (safe.length === 0) return null;
+  return (
+    <ul className="mt-2 flex flex-wrap gap-2">
+      {safe.map((a) => (
+        <li key={a.href}>
+          {a.href.startsWith("/") ? (
+            <Link href={a.href} className={style}>
+              {a.label}
+            </Link>
+          ) : (
+            <a href={a.href} className={style}>
+              {a.label}
+            </a>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string; mode: AssistantMode }) {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -63,9 +95,9 @@ export function ChatPanel({ initialQuestion, enabled }: { initialQuestion?: stri
     setError(null);
     try {
       const history = before.slice(-MAX_HISTORY_MESSAGES).map(({ role, content }) => ({ role, content }));
-      const reply = await requestReply({ message: pending.content, history }, ctrl.signal);
+      const { reply, actions, suggestions } = await requestReply({ message: pending.content, history }, ctrl.signal);
       setMessages((current) => {
-        const next = [...current, newMessage("assistant", reply)];
+        const next = [...current, newMessage("assistant", reply, { actions, suggestions })];
         saveMessages(next);
         return next;
       });
@@ -96,11 +128,11 @@ export function ChatPanel({ initialQuestion, enabled }: { initialQuestion?: stri
     startedRef.current = true;
     const stored = loadMessages();
     setMessages(stored);
-    if (initialQuestion && enabled) {
+    if (initialQuestion) {
       send(initialQuestion, stored);
       router.replace("/chat", { scroll: false });
     }
-  }, [initialQuestion, enabled, send, router]);
+  }, [initialQuestion, send, router]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -129,11 +161,13 @@ export function ChatPanel({ initialQuestion, enabled }: { initialQuestion?: stri
   };
 
   const remaining = MAX_PROMPT_LENGTH - draft.length;
+  const last = messages.at(-1);
+  const quickReplies = !busy && !error && last?.role === "assistant" ? (last.suggestions ?? []) : [];
 
   return (
     <div className="flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-        <p className="text-sm text-slate-600">Jobs, CVs, job alerts and hiring — ask in plain English.</p>
+        <p className="text-sm text-slate-600">Find a job, hire, build your profile, apply, or contact the team.</p>
         {messages.length > 0 && (
           <button type="button" onClick={reset} className="text-sm text-slate-500 hover:text-brand-700">
             New conversation
@@ -142,23 +176,19 @@ export function ChatPanel({ initialQuestion, enabled }: { initialQuestion?: stri
       </div>
 
       <div className="min-h-[18rem] space-y-3 px-4 py-5" aria-live="polite" aria-busy={busy}>
-        {!enabled && (
+        {mode === "guide" && (
           <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            The assistant is offline right now. Please try again later.
+            AI answers are switched off right now, so the assistant will guide you to the right place instead.
           </p>
         )}
 
-        {enabled && messages.length === 0 && !busy && (
+        {messages.length === 0 && !busy && (
           <div>
             <p className="text-slate-600">Hi, I&apos;m the Workerra assistant. How can I help?</p>
             <ul className="mt-3 flex flex-wrap gap-2">
               {SUGGESTED_PROMPTS.map((s) => (
                 <li key={s.label}>
-                  <button
-                    type="button"
-                    onClick={() => send(s.prompt, messages)}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-700 hover:border-brand-500 hover:text-brand-700"
-                  >
+                  <button type="button" onClick={() => send(s.prompt, messages)} className={CHIP}>
                     {s.label}
                   </button>
                 </li>
@@ -173,13 +203,25 @@ export function ChatPanel({ initialQuestion, enabled }: { initialQuestion?: stri
               {m.content}
             </p>
           ) : (
-            <p
-              key={m.id}
-              className="w-fit max-w-[85%] whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-slate-800"
-            >
-              {m.content}
-            </p>
+            <div key={m.id} className="max-w-[85%]">
+              <p className="w-fit whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-slate-800">
+                {m.content}
+              </p>
+              {m.actions && m.actions.length > 0 && <ActionLinks actions={m.actions} />}
+            </div>
           ),
+        )}
+
+        {quickReplies.length > 0 && (
+          <ul className="flex flex-wrap gap-2" aria-label="Suggested replies">
+            {quickReplies.map((text) => (
+              <li key={text}>
+                <button type="button" onClick={() => send(text, messages)} className={CHIP}>
+                  {text}
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
 
         {busy && (
@@ -216,13 +258,12 @@ export function ChatPanel({ initialQuestion, enabled }: { initialQuestion?: stri
             onKeyDown={onKeyDown}
             maxLength={MAX_PROMPT_LENGTH}
             rows={2}
-            disabled={!enabled}
-            placeholder={enabled ? "Ask about jobs, your CV, or hiring…" : "The assistant is offline"}
+            placeholder="Ask about jobs, hiring, your profile or applications…"
             className="max-h-48 flex-1 resize-y rounded-lg px-3 py-2 text-slate-900 outline-none placeholder:text-slate-400 disabled:bg-slate-50"
           />
           <button
             type="submit"
-            disabled={!enabled || busy || !draft.trim()}
+            disabled={busy || !draft.trim()}
             className="rounded-lg bg-brand-600 px-4 py-2 font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
             Send
