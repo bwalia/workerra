@@ -11,6 +11,14 @@ describe("loadServerEnv", () => {
     expect(env.nebula).toBeNull();
     expect(env.opsapi).toBeNull();
     expect(env.jobshoutApiUrl).toBeNull();
+    expect(env.contactEmail).toBeNull();
+  });
+
+  it("accepts a single contact email and rejects anything that could inject into mailto:", () => {
+    expect(loadServerEnv({ CONTACT_EMAIL: " team@workerra.uk " }).contactEmail).toBe("team@workerra.uk");
+    expect(() => loadServerEnv({ CONTACT_EMAIL: "a@x.uk?bcc=b@y.uk" })).toThrow(/CONTACT_EMAIL/);
+    expect(() => loadServerEnv({ CONTACT_EMAIL: "a@x.uk,b@y.uk" })).toThrow(/CONTACT_EMAIL/);
+    expect(() => loadServerEnv({ CONTACT_EMAIL: "not-an-email" })).toThrow(/CONTACT_EMAIL/);
   });
 
   it("only enables the CRM when fully configured", () => {

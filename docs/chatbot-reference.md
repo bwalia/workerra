@@ -100,6 +100,26 @@ browser ──POST /api/chat {message, history}──▶ Workerra route (src/app
   sizes, timings and model, never message text.
 - Rate limit: 20 requests/minute per client IP, in process memory (single replica).
 
+### Guided journeys and guided mode (2026-10-27)
+
+The assistant guides people through five journeys: find a job, hire someone,
+create a candidate profile, apply for a job, contact the recruitment team
+(`src/modules/chatbot/journeys.ts`).
+
+- Each reply carries `{reply, mode, journey, actions, suggestions}`. The journey is
+  detected deterministically (keywords, then the person's earlier messages), and
+  it alone decides the links (`actions`, internal paths or `mailto:` only) and quick
+  replies. The model writes the text; it is told not to write URLs.
+- A job search becomes a `/jobs?q=&location=&workplace=&type=` link built from what
+  the person said across the conversation.
+- **Guided mode:** with no `NEBULA_URL`, or a NebulaDB that only has its mock LLM,
+  the assistant answers from built-in guides (`server/guide.ts`) instead of going
+  offline. Local development needs no secrets. Guides are honest that listings,
+  profiles and applications are not live yet.
+- `CONTACT_EMAIL` (optional, read at request time): the team inbox offered for the
+  contact journey, in both modes. Unset → the assistant says there is no contact
+  channel yet rather than inventing one.
+
 Not ported yet: semantic job/candidate matching (`/api/v1/ai/search` needs a job
 source), bucket writes, OpsAPI lead capture, apply-in-chat. Each needs a module that
 does not exist yet.
@@ -117,7 +137,7 @@ NEBULA_LLM_READ_TIMEOUT_SECS=180 ~/projects/nebuladb/target/debug/nebula-server
 ```
 
 Without `NEBULA_LLM_OLLAMA_URL`, NebulaDB falls back to its mock LLM and Workerra
-reports the assistant as unavailable.
+answers in guided mode instead.
 
 ## Gaps to close while porting (do not copy as-is)
 

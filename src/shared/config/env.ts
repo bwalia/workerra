@@ -16,6 +16,8 @@ export interface ServerEnv {
   opsapi: { url: string; namespace: string; apiKey: string } | null;
   /** JobShout agent platform (Career Agent). Phase 4; needs a service identity. */
   jobshoutApiUrl: string | null;
+  /** Where the assistant tells people to email the recruitment team. Unset → no contact channel offered. */
+  contactEmail: string | null;
 }
 
 type Source = Record<string, string | undefined>;
@@ -47,7 +49,18 @@ export function loadServerEnv(source: Source = process.env): ServerEnv {
         ? { url: stripTrailingSlash(source.OPSAPI_URL), namespace: source.OPSAPI_NAMESPACE, apiKey: source.OPSAPI_API_KEY }
         : null,
     jobshoutApiUrl: source.JOBSHOUT_API_URL ? stripTrailingSlash(source.JOBSHOUT_API_URL) : null,
+    contactEmail: parseContactEmail(source.CONTACT_EMAIL),
   };
+}
+
+function parseContactEmail(value: string | undefined): string | null {
+  const email = value?.trim();
+  if (!email) return null;
+  // Ends up in a mailto: link, so refuse anything that could add headers or a second address.
+  if (!/^[^\s@,;?&]+@[^\s@,;?&]+\.[^\s@,;?&]+$/.test(email)) {
+    throw new Error(`CONTACT_EMAIL must be a single email address, got "${email}"`);
+  }
+  return email;
 }
 
 function stripTrailingSlash(url: string): string {

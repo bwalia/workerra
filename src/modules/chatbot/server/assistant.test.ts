@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HISTORY_CHAR_BUDGET, SYSTEM_PROMPT, buildPrompt, toPlainText } from "./assistant";
+import { HISTORY_CHAR_BUDGET, SYSTEM_PROMPT, buildPrompt, systemPrompt, toPlainText } from "./assistant";
 
 describe("buildPrompt", () => {
   it("sends just the message when there is no history", () => {
@@ -36,9 +36,24 @@ describe("toPlainText", () => {
 });
 
 describe("SYSTEM_PROMPT", () => {
-  it("covers each job the assistant is for and forbids invented listings", () => {
-    for (const topic of ["jobs", "CV", "job alerts", "Recruiters", "Workerra's recruitment services", "Never invent"]) {
+  it("covers the five journeys and forbids invented listings and URLs", () => {
+    for (const topic of [
+      "Finding jobs",
+      "Hiring employees",
+      "Creating a candidate profile",
+      "Applying for jobs",
+      "Contacting the recruitment team",
+      "Never invent",
+      "Do not write URLs",
+    ]) {
       expect(SYSTEM_PROMPT).toContain(topic);
     }
+  });
+});
+
+describe("systemPrompt", () => {
+  it("gives the team inbox only when one is configured", () => {
+    expect(systemPrompt({ contactEmail: "team@workerra.uk" })).toContain("team@workerra.uk");
+    expect(systemPrompt({ contactEmail: null })).toContain("no contact channel");
   });
 });

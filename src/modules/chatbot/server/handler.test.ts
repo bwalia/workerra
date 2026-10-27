@@ -33,11 +33,16 @@ describe("handleChatPost", () => {
     vi.restoreAllMocks();
   });
 
-  it("is offline (503) when NebulaDB is not configured", async () => {
+  it("answers from the guide when NebulaDB is not configured", async () => {
     vi.stubEnv("NEBULA_URL", "");
-    const res = await post({ message: "hi" });
-    expect(res.status).toBe(503);
-    expect((await res.json()).error.code).toBe("assistant_offline");
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await post({ message: "I want to hire someone." });
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data).toMatchObject({ mode: "guide", journey: "hire" });
+    expect(data.actions.length).toBeGreaterThan(0);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects invalid bodies with 400", async () => {
@@ -54,7 +59,7 @@ describe("handleChatPost", () => {
     const res = await post({ message: QUESTION, history: [{ role: "assistant", content: "Hello" }] });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: { reply: "Happy to help." } });
+    expect((await res.json()).data).toMatchObject({ reply: "Happy to help.", mode: "ai", journey: "candidate_profile" });
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string).message).toContain(QUESTION);
     expect(logs.join("")).toContain("assistant replied");
     expect(logs.join("")).not.toContain(QUESTION);
@@ -70,11 +75,24 @@ describe("handleChatPost", () => {
     expect(logs.join("")).not.toContain(QUESTION);
   });
 
-  it("treats a mock LLM as offline rather than answering", async () => {
+  it("answers from the guide, not the canned text, when NebulaDB only has a mock LLM", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json({ answer: "canned", is_mock: true })));
     const res = await post({ message: "hi" });
-    expect(res.status).toBe(503);
-    expect(JSON.stringify(await res.json())).not.toContain("canned");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.mode).toBe("guide");
+    expect(JSON.stringify(body)).not.toContain("canned");
+  });
+
+  it("adds journey links to an AI answer and tells the model the team inbox", async () => {
+    vi.stubEnv("CONTACT_EMAIL", "team@workerra.uk");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ answer: "Sure.", is_mock: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await post({ message: "How do I contact the recruitment team?" });
+    const { data } = await res.json();
+    expect(data).toMatchObject({ mode: "ai", journey: "contact" });
+    expect(data.actions[0].href).toBe("mailto:team@workerra.uk");
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string).system).toContain("team@workerra.uk");
   });
 
   it("rate limits a client after 20 requests a minute", async () => {
