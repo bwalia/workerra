@@ -18,7 +18,7 @@ export function ChatEntry() {
 
   return (
     <div className="w-full max-w-2xl">
-      <form onSubmit={onSubmit} className="flex gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+      <form onSubmit={onSubmit} className="flex gap-2 rounded-xl border border-line bg-surface p-2 shadow-sm">
         <label htmlFor="chat-entry" className="sr-only">
           Ask Workerra
         </label>
@@ -28,7 +28,7 @@ export function ChatEntry() {
           onChange={(e) => setPrompt(e.target.value)}
           maxLength={MAX_PROMPT_LENGTH}
           placeholder="Ask about jobs, hiring, your profile or applications…"
-          className="flex-1 rounded-lg px-3 py-2 text-slate-900 outline-none placeholder:text-slate-400"
+          className="flex-1 rounded-lg bg-transparent px-3 py-2 text-ink outline-none placeholder:text-faint"
         />
         <button
           type="submit"
@@ -44,7 +44,7 @@ export function ChatEntry() {
             <button
               type="button"
               onClick={() => start(s.prompt)}
-              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-700 hover:border-brand-500 hover:text-brand-700"
+              className="rounded-full border border-line bg-surface px-3 py-1 text-sm text-body hover:border-brand-500 hover:text-accent"
             >
               {s.label}
             </button>
