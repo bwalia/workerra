@@ -175,8 +175,8 @@ export function Benefits() {
   );
 }
 
-/** Latest listings, or an honest note when this ring has none. */
-export function FeaturedJobs({ jobs }: { jobs: readonly Job[] | null }) {
+/** Latest listings, or an honest note when this ring has none or they couldn't be loaded. */
+export function FeaturedJobs({ jobs, failed = false }: { jobs: readonly Job[] | null; failed?: boolean }) {
   return (
     <section aria-labelledby="featured-jobs" className="py-16">
       <Container>
@@ -212,8 +212,12 @@ export function FeaturedJobs({ jobs }: { jobs: readonly Job[] | null }) {
         ) : (
           <div className="mt-6 rounded-lg border border-line bg-surface p-6">
             <p className="text-body">
-              Job listings aren&rsquo;t live on Workerra yet. In the meantime, the assistant can help you work out what to
-              search for and get your CV ready.
+              {failed
+                ? "We couldn’t load the latest jobs just now."
+                : jobs
+                  ? "There are no open jobs listed right now."
+                  : "Job listings aren’t live on Workerra yet."}{" "}
+              In the meantime, the assistant can help you work out what to search for and get your CV ready.
             </p>
             <Link href={chatHref("Help me work out what jobs suit me")} className={`mt-4 inline-block ${BUTTON_SECONDARY}`}>
               Ask the assistant

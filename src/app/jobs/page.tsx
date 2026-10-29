@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { JobSearch, JobsUnavailable, countBySector, parseJobSearchParams, searchJobs } from "@/modules/jobs";
-import { listJobs } from "@/modules/jobs/server";
+import { JobSearch, JobsUnavailable, parseJobSearchParams } from "@/modules/jobs";
+import { jobSource } from "@/modules/jobs/server";
+import { logger } from "@/shared/logging";
 
 export const metadata: Metadata = {
   title: "Jobs",
@@ -9,9 +10,15 @@ export const metadata: Metadata = {
 // Which listings a ring serves depends on runtime env (one image per ring), so never prerender.
 export const dynamic = "force-dynamic";
 
-export default function JobsPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
+export default async function JobsPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const filters = parseJobSearchParams(searchParams);
-  const jobs = listJobs();
-  if (!jobs) return <JobsUnavailable query={filters.q} />;
-  return <JobSearch filters={filters} result={searchJobs(jobs, filters)} sectorCounts={countBySector(jobs)} />;
+  const source = jobSource();
+  if (!source) return <JobsUnavailable reason="not_live" query={filters.q} />;
+  try {
+    const [result, sectorCounts] = await Promise.all([source.search(filters), source.sectorCounts()]);
+    return <JobSearch filters={filters} result={result} sectorCounts={sectorCounts} />;
+  } catch (err) {
+    logger.error("job search unavailable", { error: err });
+    return <JobsUnavailable reason="error" query={filters.q} />;
+  }
 }

@@ -100,6 +100,11 @@ taken from `bwalia/diy-tax-return-uk` `migrations/opsapi/`:
 - **Delivery:** an image `FROM bwalia/opsapi:<tag>` that copies the plugin to
   `/app/projects/workerra/` and runs `helper.project-migrator` as a Helm
   pre-upgrade hook after OpsAPI's own migrations.
+- **Job listings (live):** `/jobs`, job pages and the home page's latest jobs
+  search ATS jobs published through the plugin (`workerra_job_listings`,
+  `GET /api/v2/workerra/jobs`), when `OPSAPI_*` is set. Filtering and paging run in
+  OpsAPI's Postgres. Without OpsAPI the jobs module falls back to its built-in
+  samples (non-prod) or says listings aren't live. See `migrations/opsapi/README.md`.
 - **Known SDK gap:** `@opsapi/client` 1.3.0 has no ATS paths (generated against a
   server without the `ats` feature). Regenerate the SDK with `ats` enabled.
 

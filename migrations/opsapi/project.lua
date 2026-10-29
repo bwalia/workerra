@@ -15,9 +15,13 @@ return {
     description = "UK recruitment platform (consumer of OpsAPI)",
     enabled = true,
 
-    -- Features this project relies on from core OpsAPI. `core` is always on.
-    depends = { "core" },
+    -- Features this project relies on from core OpsAPI. `core` is always on;
+    -- job listings extend the ATS's jobs (ats_jobs).
+    depends = { "core", "ats" },
 
-    -- RBAC modules this plugin registers. Empty until it ships api/*.lua routes.
-    modules = {},
+    -- RBAC modules this plugin registers. Workerra's server calls the plugin
+    -- with an opsk_ API key scoped to these (e.g. workerra_jobs: ["read"]).
+    modules = {
+        { machine_name = "workerra_jobs", name = "Job listings", category = "Workerra" },
+    },
 }
