@@ -4,6 +4,9 @@
 #   postgres            pgvector Postgres (OpsAPI's migrations need pgvector + pgcrypto)
 #   opsapi-migrate      OpsAPI's own migrations, every module (PROJECT_CODE=all, as INT)
 #   workerra-migrations Workerra's plugin migrations (Dockerfile.migrations)
+#   opsapi              an OpsAPI server with the plugin mounted, on http://localhost:4041,
+#                       so Workerra's /jobs can search it (profile: server)
+#   bootstrap           creates the workerra workspace and prints an API key (profile: server)
 #   psql                ad-hoc queries: `run --rm psql -c "..."`
 name: workerra-opsapi
 
@@ -69,6 +72,40 @@ services:
       - lapis
       - exec
       - "require('helper.project-migrator').migrate('workerra', '/app/projects/workerra')"
+
+  opsapi:
+    image: docker.io/bwalia/opsapi:${OPSAPI_TAG:-latest}
+    platform: linux/amd64
+    profiles: [server]
+    depends_on:
+      workerra-migrations: { condition: service_completed_successfully }
+    environment:
+      <<: *db-env
+      PROJECT_CODE: all
+      REDIS_ENABLED: "false"
+      OPENSSL_SECRET_KEY: local-only-not-a-secret-0123456789
+      # Reload the plugin's api/*.lua on save while developing it.
+      OPSAPI_DEV_RELOAD: "true"
+    ports:
+      - "127.0.0.1:${OPSAPI_PORT:-4041}:80"
+    volumes:
+      # The working copy, not the image's copy, so route edits apply without a rebuild.
+      - ./migrations/opsapi:/app/projects/workerra:ro
+
+  bootstrap:
+    image: docker.io/bwalia/opsapi:${OPSAPI_TAG:-latest}
+    platform: linux/amd64
+    profiles: [server]
+    depends_on:
+      workerra-migrations: { condition: service_completed_successfully }
+    environment:
+      <<: *db-env
+      PROJECT_CODE: all
+      OPENSSL_SECRET_KEY: local-only-not-a-secret-0123456789
+    working_dir: /app
+    volumes:
+      - ./migrations/opsapi:/app/projects/workerra:ro
+    command: ["lapis", "exec", "assert(loadfile('/app/projects/workerra/dev/bootstrap.lua'))()"]
 
   psql:
     image: pgvector/pgvector:pg14

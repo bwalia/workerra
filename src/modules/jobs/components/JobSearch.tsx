@@ -71,7 +71,7 @@ export function JobSearch({
 
       <p className="mt-6 text-sm text-muted" aria-live="polite">
         {result.total === 1 ? "1 job" : `${result.total} jobs`}
-        {filtered ? " match your search" : ", newest first"}
+        {filtered ? (result.total === 1 ? " matches your search" : " match your search") : result.total > 0 ? ", newest first" : ""}
       </p>
       {result.jobs.length ? (
         <ul className="mt-3 grid gap-3">
@@ -81,8 +81,19 @@ export function JobSearch({
             </li>
           ))}
         </ul>
-      ) : (
+      ) : filtered ? (
         <NoMatches filters={filters} />
+      ) : (
+        <div className="mt-3 rounded-lg border border-line bg-surface px-5 py-6">
+          <h2 className="text-lg font-semibold text-ink">There are no open jobs right now</h2>
+          <p className="mt-2 max-w-2xl text-body">
+            New roles are added as employers publish them. In the meantime, the assistant can help you work out what to
+            look for and get your CV ready.
+          </p>
+          <Link href={chatHref("Help me work out what jobs suit me")} className={`mt-5 inline-block ${SECONDARY}`}>
+            Ask the assistant
+          </Link>
+        </div>
       )}
 
       {result.pageCount > 1 && (
@@ -104,17 +115,30 @@ export function JobSearch({
   );
 }
 
-/** /jobs on a ring with no job source yet: say so plainly and point somewhere useful. */
-export function JobsUnavailable({ query }: { query: string }) {
+/**
+ * /jobs without results to show: a ring with no job source yet ("not_live"),
+ * or one whose source couldn't be reached ("error"). Says which, plainly.
+ */
+export function JobsUnavailable({ reason, query }: { reason: "not_live" | "error"; query: string }) {
+  const heading = reason === "error" ? "Job search isn’t available right now" : "We’re not listing vacancies yet";
   return (
     <Container className="py-12">
       <JobsIntro />
-      <div className="mt-8 rounded-lg border border-line bg-surface p-6">
-        <h2 className="text-lg font-semibold text-ink">We&rsquo;re not listing vacancies yet</h2>
+      <div role={reason === "error" ? "alert" : undefined} className="mt-8 rounded-lg border border-line bg-surface p-6">
+        <h2 className="text-lg font-semibold text-ink">{heading}</h2>
         <p className="mt-2 max-w-2xl text-body">
-          Workerra is still being built and job listings aren&rsquo;t live.
-          {query && <> Your search for &ldquo;{query}&rdquo; will work once they are.</>} Until then, the assistant can help
-          you work out what to look for and get your CV ready.
+          {reason === "error" ? (
+            <>
+              We couldn&rsquo;t load job listings just now. Please try again in a few minutes.
+              {query && <> Your search for &ldquo;{query}&rdquo; is kept in the address bar, so refreshing will run it again.</>}
+            </>
+          ) : (
+            <>
+              Workerra is still being built and job listings aren&rsquo;t live.
+              {query && <> Your search for &ldquo;{query}&rdquo; will work once they are.</>}
+            </>
+          )}{" "}
+          Until then, the assistant can help you work out what to look for and get your CV ready.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Link href={chatHref(query ? `Help me find ${query} jobs` : "Help me work out what jobs suit me")} className={PRIMARY}>

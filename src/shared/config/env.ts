@@ -12,13 +12,13 @@ export interface ServerEnv {
   logLevel: LogLevel;
   /** NebulaDB: LLM chat, embeddings and hybrid search used by the JobShout recruiting bot. */
   nebula: { url: string; apiKey: string | null } | null;
-  /** OpsAPI CRM, where the assistant records candidate and recruiter leads. */
+  /** OpsAPI: job listings (Workerra's plugin over the ATS) and, later, CRM leads. */
   opsapi: { url: string; namespace: string; apiKey: string } | null;
   /** JobShout agent platform (Career Agent). Phase 4; needs a service identity. */
   jobshoutApiUrl: string | null;
   /** Where the assistant tells people to email the recruitment team. Unset → no contact channel offered. */
   contactEmail: string | null;
-  /** Serve the built-in sample job listings on /jobs. Always off in prod. */
+  /** Show sample job listings (built-in, or marked as samples in OpsAPI). Always off in prod. */
   sampleJobs: boolean;
 }
 

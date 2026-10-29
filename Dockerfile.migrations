@@ -11,9 +11,12 @@ FROM docker.io/bwalia/opsapi:${OPSAPI_TAG}
 
 COPY migrations/opsapi/project.lua  /app/projects/workerra/project.lua
 COPY migrations/opsapi/migrations   /app/projects/workerra/migrations
+# Workerra's endpoints (/api/v2/workerra/*): an OpsAPI server serving Workerra
+# runs this image, or mounts the same files at /app/projects/workerra/.
+COPY migrations/opsapi/api          /app/projects/workerra/api
 
 # Fail the build, not the deploy, if the runner couldn't find the files.
 RUN test -f /app/projects/workerra/project.lua \
- && ls /app/projects/workerra/migrations/*.lua > /dev/null
+ && ls /app/projects/workerra/migrations/*.lua /app/projects/workerra/api/*.lua > /dev/null
 
 # Base image entrypoint kept, so `docker run --rm <image> lapis exec ...` works.
