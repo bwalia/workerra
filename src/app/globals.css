@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+/* Theme palette as RGB channels, read by tailwind.config.ts. Light by default;
+   .dark on <html> (set by the theme script in layout.tsx) switches to dark. */
+@layer base {
+  :root {
+    color-scheme: light;
+    --canvas: 248 250 252; /* slate-50 */
+    --surface: 255 255 255;
+    --subtle: 241 245 249; /* slate-100 */
+    --line: 226 232 240; /* slate-200 */
+    --line-strong: 203 213 225; /* slate-300 */
+    --ink: 15 23 42; /* slate-900 */
+    --body: 51 65 85; /* slate-700 */
+    --muted: 71 85 105; /* slate-600 */
+    --faint: 148 163 184; /* slate-400 */
+    --accent: 26 79 177; /* brand-700 */
+    --accent-soft: 238 247 255; /* brand-50 */
+  }
+
+  .dark {
+    color-scheme: dark;
+    --canvas: 2 6 23; /* slate-950 */
+    --surface: 15 23 42; /* slate-900 */
+    --subtle: 30 41 59; /* slate-800 */
+    --line: 30 41 59; /* slate-800 */
+    --line-strong: 51 65 85; /* slate-700 */
+    --ink: 241 245 249; /* slate-100 */
+    --body: 203 213 225; /* slate-300 */
+    --muted: 148 163 184; /* slate-400 */
+    --faint: 100 116 139; /* slate-500 */
+    --accent: 125 176 255;
+    --accent-soft: 17 34 66;
+  }
+
+  body {
+    @apply bg-canvas text-ink antialiased;
+  }
 }

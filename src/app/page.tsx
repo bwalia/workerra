@@ -8,12 +8,12 @@ export default function HomePage() {
 
   return (
     <>
-      <section className="bg-gradient-to-b from-brand-50 to-slate-50 py-20">
+      <section className="bg-gradient-to-b from-accent-soft to-canvas py-20">
         <Container className="flex flex-col items-center text-center">
-          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl">
+          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
             Find work or hire — just ask.
           </h1>
-          <p className="mt-4 max-w-xl text-lg text-slate-600">
+          <p className="mt-4 max-w-xl text-lg text-muted">
             Workerra&apos;s AI assistant finds matching jobs, helps with your CV and applications, and gives recruiters
             shortlists.
           </p>
@@ -31,10 +31,10 @@ export default function HomePage() {
               <li key={m.id}>
                 <Link
                   href={m.basePath!}
-                  className="block h-full rounded-lg border border-slate-200 bg-white p-5 hover:border-brand-500"
+                  className="block h-full rounded-lg border border-line bg-surface p-5 hover:border-brand-500"
                 >
-                  <span className="font-medium text-slate-900">{m.name}</span>
-                  <p className="mt-1 text-sm text-slate-600">{m.summary}</p>
+                  <span className="font-medium text-ink">{m.name}</span>
+                  <p className="mt-1 text-sm text-muted">{m.summary}</p>
                 </Link>
               </li>
             ))}

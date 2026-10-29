@@ -13,8 +13,8 @@ export default function ChatPage({ searchParams }: { searchParams: { q?: string 
 
   return (
     <Container className="py-12">
-      <h1 className="text-3xl font-semibold text-slate-900">{chatbotModule.name}</h1>
-      <p className="mt-2 max-w-2xl text-slate-600">
+      <h1 className="text-3xl font-semibold text-ink">{chatbotModule.name}</h1>
+      <p className="mt-2 max-w-2xl text-muted">
         Find a job, hire someone, create your candidate profile, apply for jobs, or contact the recruitment team.
       </p>
       <div className="mt-8 max-w-3xl">

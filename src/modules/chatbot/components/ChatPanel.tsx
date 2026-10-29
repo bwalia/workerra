@@ -47,14 +47,14 @@ async function requestReply(body: ChatRequest, signal: AbortSignal): Promise<Cha
 }
 
 const CHIP =
-  "rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-700 hover:border-brand-500 hover:text-brand-700";
+  "rounded-full border border-line bg-surface px-3 py-1 text-sm text-body hover:border-brand-500 hover:text-accent";
 
 /**
  * Links under an answer. Internal pages use client navigation; mailto: is a plain link.
  * Messages are restored from sessionStorage, so hrefs are re-checked before rendering.
  */
 function ActionLinks({ actions }: { actions: ChatAction[] }) {
-  const style = "rounded-lg border border-brand-500 px-3 py-1 text-sm font-medium text-brand-700 hover:bg-brand-50";
+  const style = "rounded-lg border border-brand-500 px-3 py-1 text-sm font-medium text-accent hover:bg-accent-soft";
   const safe = actions.filter((a) => typeof a?.href === "string" && isSafeActionHref(a.href));
   if (safe.length === 0) return null;
   return (
@@ -165,11 +165,11 @@ export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string;
   const quickReplies = !busy && !error && last?.role === "assistant" ? (last.suggestions ?? []) : [];
 
   return (
-    <div className="flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-        <p className="text-sm text-slate-600">Find a job, hire, build your profile, apply, or contact the team.</p>
+    <div className="flex flex-col rounded-xl border border-line bg-surface shadow-sm">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
+        <p className="text-sm text-muted">Find a job, hire, build your profile, apply, or contact the team.</p>
         {messages.length > 0 && (
-          <button type="button" onClick={reset} className="text-sm text-slate-500 hover:text-brand-700">
+          <button type="button" onClick={reset} className="text-sm text-muted hover:text-accent">
             New conversation
           </button>
         )}
@@ -177,14 +177,14 @@ export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string;
 
       <div className="min-h-[18rem] space-y-3 px-4 py-5" aria-live="polite" aria-busy={busy}>
         {mode === "guide" && (
-          <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
             AI answers are switched off right now, so the assistant will guide you to the right place instead.
           </p>
         )}
 
         {messages.length === 0 && !busy && (
           <div>
-            <p className="text-slate-600">Hi, I&apos;m the Workerra assistant. How can I help?</p>
+            <p className="text-muted">Hi, I&apos;m the Workerra assistant. How can I help?</p>
             <ul className="mt-3 flex flex-wrap gap-2">
               {SUGGESTED_PROMPTS.map((s) => (
                 <li key={s.label}>
@@ -204,7 +204,7 @@ export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string;
             </p>
           ) : (
             <div key={m.id} className="max-w-[85%]">
-              <p className="w-fit whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-slate-800">
+              <p className="w-fit whitespace-pre-wrap rounded-xl border border-line bg-subtle px-4 py-2 text-ink">
                 {m.content}
               </p>
               {m.actions && m.actions.length > 0 && <ActionLinks actions={m.actions} />}
@@ -225,18 +225,18 @@ export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string;
         )}
 
         {busy && (
-          <p role="status" className="flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-slate-500">
+          <p role="status" className="flex w-fit items-center gap-2 rounded-xl border border-line bg-subtle px-4 py-2 text-muted">
             <span className="flex gap-1" aria-hidden>
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-faint [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-faint [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-faint" />
             </span>
             Workerra is thinking…
           </p>
         )}
 
         {error && (
-          <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
             <span>{error.text}</span>
             <button type="button" onClick={retry} className="font-medium underline hover:no-underline">
               Try again
@@ -246,7 +246,7 @@ export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string;
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={onSubmit} className="border-t border-slate-200 p-3">
+      <form onSubmit={onSubmit} className="border-t border-line p-3">
         <div className="flex items-end gap-2">
           <label htmlFor="chat-composer" className="sr-only">
             Message the Workerra assistant
@@ -259,7 +259,7 @@ export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string;
             maxLength={MAX_PROMPT_LENGTH}
             rows={2}
             placeholder="Ask about jobs, hiring, your profile or applications…"
-            className="max-h-48 flex-1 resize-y rounded-lg px-3 py-2 text-slate-900 outline-none placeholder:text-slate-400 disabled:bg-slate-50"
+            className="max-h-48 flex-1 resize-y rounded-lg bg-transparent px-3 py-2 text-ink outline-none placeholder:text-faint disabled:bg-subtle"
           />
           <button
             type="submit"
@@ -269,9 +269,9 @@ export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string;
             Send
           </button>
         </div>
-        <div className="mt-2 flex justify-between gap-4 px-1 text-xs text-slate-400">
+        <div className="mt-2 flex justify-between gap-4 px-1 text-xs text-faint">
           <span>AI answers can be wrong. Don&apos;t share passwords, bank details or ID documents.</span>
-          {remaining < 200 && <span className={remaining < 50 ? "text-amber-600" : undefined}>{remaining} left</span>}
+          {remaining < 200 && <span className={remaining < 50 ? "text-amber-600 dark:text-amber-400" : undefined}>{remaining} left</span>}
         </div>
       </form>
     </div>

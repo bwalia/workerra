@@ -13,7 +13,7 @@ export default function JobsPage({ searchParams }: { searchParams: Record<string
   if (!jobs) {
     return (
       <ModulePlaceholder module={jobsModule}>
-        {filters.q && <p className="mt-6 text-sm text-slate-500">Search for “{filters.q}” will work once listings exist.</p>}
+        {filters.q && <p className="mt-6 text-sm text-muted">Search for “{filters.q}” will work once listings exist.</p>}
       </ModulePlaceholder>
     );
   }
