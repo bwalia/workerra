@@ -18,6 +18,8 @@ export interface ServerEnv {
   jobshoutApiUrl: string | null;
   /** Where the assistant tells people to email the recruitment team. Unset → no contact channel offered. */
   contactEmail: string | null;
+  /** Serve the built-in sample job listings on /jobs. Always off in prod. */
+  sampleJobs: boolean;
 }
 
 type Source = Record<string, string | undefined>;
@@ -50,6 +52,8 @@ export function loadServerEnv(source: Source = process.env): ServerEnv {
         : null,
     jobshoutApiUrl: source.JOBSHOUT_API_URL ? stripTrailingSlash(source.JOBSHOUT_API_URL) : null,
     contactEmail: parseContactEmail(source.CONTACT_EMAIL),
+    // Test data only: on by default locally, opt-in on int/test/acc, never on prod.
+    sampleJobs: appEnv !== "prod" && (source.SAMPLE_JOBS ? source.SAMPLE_JOBS === "true" : appEnv === "local"),
   };
 }
 
