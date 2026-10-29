@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SAMPLE_JOBS } from "./sample-jobs";
-import { formatSalary, jobSearchQuery, searchJobs } from "./search";
+import { SECTOR_LABELS, countBySector, formatSalary, hasFilters, jobSearchQuery, searchJobs } from "./search";
 import { parseJobSearchParams } from "./search-params";
 import type { Job } from "./types";
 
@@ -39,6 +39,12 @@ describe("searchJobs", () => {
     expect(titles({ workplace: "hybrid", location: "London" })).toEqual(["Management Accountant"]);
   });
 
+  it("filters by sector", () => {
+    expect(titles({ sector: "technology" }).sort()).toEqual(["DevOps Engineer (Kubernetes)", "Senior React Developer"]);
+    expect(titles({ sector: "technology", workplace: "remote" })).toEqual(["DevOps Engineer (Kubernetes)"]);
+    expect(titles({ sector: "admin" })).toEqual([]);
+  });
+
   it("works with the searches the assistant links to", () => {
     expect(titles({ q: "React developer", location: "Manchester", workplace: "hybrid" })).toEqual(["Senior React Developer"]);
   });
@@ -57,6 +63,23 @@ describe("searchJobs", () => {
   });
 });
 
+describe("countBySector", () => {
+  it("counts open jobs in every sector, including empty ones", () => {
+    const counts = countBySector(SAMPLE_JOBS);
+    expect(Object.keys(counts).sort()).toEqual(Object.keys(SECTOR_LABELS).sort());
+    expect(counts.technology).toBe(2);
+    expect(counts.admin).toBe(0);
+    expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(SAMPLE_JOBS.length);
+  });
+});
+
+describe("hasFilters", () => {
+  it("ignores the page number", () => {
+    expect(hasFilters(parseJobSearchParams({ page: "2" }))).toBe(false);
+    expect(hasFilters(parseJobSearchParams({ sector: "education" }))).toBe(true);
+  });
+});
+
 describe("formatSalary", () => {
   it("formats ranges, single rates and missing pay", () => {
     expect(formatSalary({ min: 60000, max: 72000, currency: "GBP", period: "year" })).toBe("£60,000–£72,000 a year");
@@ -68,9 +91,9 @@ describe("formatSalary", () => {
 
 describe("jobSearchQuery", () => {
   it("round-trips filters through the /jobs query string", () => {
-    const filters = parseJobSearchParams({ q: "nurse", workplace: "onsite,hybrid", type: "full_time" });
+    const filters = parseJobSearchParams({ q: "nurse", workplace: "onsite,hybrid", type: "full_time", sector: "healthcare" });
     const href = jobSearchQuery(filters, 2);
-    expect(href).toBe("/jobs?q=nurse&workplace=onsite%2Chybrid&type=full_time&page=2");
+    expect(href).toBe("/jobs?q=nurse&workplace=onsite%2Chybrid&type=full_time&sector=healthcare&page=2");
     expect(parseJobSearchParams(Object.fromEntries(new URL(href, "http://x").searchParams))).toEqual({ ...filters, page: 2 });
   });
 });

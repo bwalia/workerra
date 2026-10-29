@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { isSafeActionHref } from "../journeys";
 import { MAX_HISTORY_MESSAGES, MAX_PROMPT_LENGTH, SUGGESTED_PROMPTS } from "../prompts";
+import { ASK_TOPICS } from "../topics";
 import type { AssistantMode, ChatAction, ChatMessage, ChatReply, ChatRequest } from "../types";
 
 // The conversation on /chat. History lives in sessionStorage (as in the JobShout
@@ -190,6 +191,20 @@ export function ChatPanel({ initialQuestion, mode }: { initialQuestion?: string;
                 <li key={s.label}>
                   <button type="button" onClick={() => send(s.prompt, messages)} className={CHIP}>
                     {s.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-6 text-sm text-muted">Or try asking:</p>
+            <ul className="mt-2 space-y-1.5">
+              {ASK_TOPICS.map(({ examples: [example] }) => (
+                <li key={example}>
+                  <button
+                    type="button"
+                    onClick={() => send(example, messages)}
+                    className="text-left text-sm text-accent hover:underline"
+                  >
+                    &ldquo;{example}&rdquo;
                   </button>
                 </li>
               ))}

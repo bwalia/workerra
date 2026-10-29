@@ -1,4 +1,5 @@
 export { Container } from "./Container";
+export { Faq, type FaqItem } from "./Faq";
 export { ModulePlaceholder } from "./ModulePlaceholder";
 export { Logo, LogoMark } from "./Logo";
 export { SiteFooter } from "./SiteFooter";

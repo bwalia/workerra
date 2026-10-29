@@ -9,4 +9,6 @@ export const marketingModule: ModuleDescriptor = {
   planned: ["Home and landing pages", "About and contact", "Blog with a content source", "SEO metadata and sitemap"],
 };
 
+export { About } from "./components/About";
+export { Benefits, CallToAction, FeaturedJobs, HomeFaq, HomeHero, HowItWorks } from "./components/Home";
 export type * from "./types";
