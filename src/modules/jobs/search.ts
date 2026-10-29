@@ -1,4 +1,4 @@
-import type { EmploymentType, Job, JobSearchFilters, JobSearchResult, SalaryRange, WorkplaceType } from "./types";
+import type { EmploymentType, Job, JobSearchFilters, JobSearchResult, JobSector, SalaryRange, WorkplaceType } from "./types";
 
 export const JOBS_PAGE_SIZE = 10;
 
@@ -12,10 +12,23 @@ export const EMPLOYMENT_LABELS: Record<EmploymentType, string> = {
   internship: "Internship",
 };
 
+export const SECTOR_LABELS: Record<JobSector, string> = {
+  technology: "Technology and IT",
+  healthcare: "Healthcare and nursing",
+  education: "Education and teaching",
+  finance: "Accounting and finance",
+  logistics: "Warehouse and logistics",
+  customer_service: "Customer service",
+  construction: "Construction and trades",
+  marketing: "Marketing and creative",
+  hospitality_retail: "Hospitality and retail",
+  admin: "Office and administration",
+};
+
 /**
  * Open jobs matching the /jobs filters, newest first. Every keyword must appear
  * in the title, company, skills or description; location is a substring match;
- * workplace and contract type match any of the chosen values.
+ * workplace and contract type match any of the chosen values; sector is exact.
  */
 export function searchJobs(jobs: readonly Job[], filters: JobSearchFilters, pageSize = JOBS_PAGE_SIZE): JobSearchResult {
   const terms = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -30,6 +43,7 @@ export function searchJobs(jobs: readonly Job[], filters: JobSearchFilters, page
     .filter((job) => !location || job.location.toLowerCase().includes(location))
     .filter((job) => !filters.workplace.length || filters.workplace.includes(job.workplace))
     .filter((job) => !filters.employmentType.length || filters.employmentType.includes(job.employmentType))
+    .filter((job) => !filters.sector || job.sector === filters.sector)
     .sort((a, b) => b.postedAt.localeCompare(a.postedAt));
 
   const pageCount = Math.max(1, Math.ceil(matches.length / pageSize));
@@ -59,7 +73,20 @@ export function jobSearchQuery(filters: JobSearchFilters, page: number): string 
   if (filters.location) params.set("location", filters.location);
   if (filters.workplace.length) params.set("workplace", filters.workplace.join(","));
   if (filters.employmentType.length) params.set("type", filters.employmentType.join(","));
+  if (filters.sector) params.set("sector", filters.sector);
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `/jobs?${query}` : "/jobs";
+}
+
+/** Open jobs per sector, for the category links on /jobs. */
+export function countBySector(jobs: readonly Job[]): Record<JobSector, number> {
+  const counts = Object.fromEntries(Object.keys(SECTOR_LABELS).map((s) => [s, 0])) as Record<JobSector, number>;
+  for (const job of jobs) if (job.status === "open") counts[job.sector]++;
+  return counts;
+}
+
+/** Whether any filter beyond the page number is set. */
+export function hasFilters(filters: JobSearchFilters): boolean {
+  return Boolean(filters.q || filters.location || filters.workplace.length || filters.employmentType.length || filters.sector);
 }

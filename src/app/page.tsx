@@ -1,46 +1,24 @@
-import Link from "next/link";
-import { MODULES } from "@/modules/catalogue";
-import { ChatEntry } from "@/modules/chatbot";
-import { Container } from "@/shared/ui";
+import { searchJobs, parseJobSearchParams } from "@/modules/jobs";
+import { listJobs } from "@/modules/jobs/server";
+import { Benefits, CallToAction, FeaturedJobs, HomeFaq, HomeHero, HowItWorks } from "@/modules/marketing";
+
+// Which listings a ring serves depends on runtime env (one image per ring), so never prerender.
+export const dynamic = "force-dynamic";
+
+const FEATURED_COUNT = 3;
 
 export default function HomePage() {
-  const browsable = MODULES.filter((m) => m.basePath && m.id !== "chatbot");
+  const jobs = listJobs();
+  const featured = jobs ? searchJobs(jobs, parseJobSearchParams({}), FEATURED_COUNT).jobs : null;
 
   return (
     <>
-      <section className="bg-gradient-to-b from-accent-soft to-canvas py-20">
-        <Container className="flex flex-col items-center text-center">
-          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
-            Find work or hire — just ask.
-          </h1>
-          <p className="mt-4 max-w-xl text-lg text-muted">
-            Workerra&apos;s AI assistant finds matching jobs, helps with your CV and applications, and gives recruiters
-            shortlists.
-          </p>
-          <div className="mt-8 flex w-full justify-center">
-            <ChatEntry />
-          </div>
-        </Container>
-      </section>
-
-      <section className="py-16">
-        <Container>
-          <h2 className="text-xl font-semibold">Explore Workerra</h2>
-          <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {browsable.map((m) => (
-              <li key={m.id}>
-                <Link
-                  href={m.basePath!}
-                  className="block h-full rounded-lg border border-line bg-surface p-5 hover:border-brand-500"
-                >
-                  <span className="font-medium text-ink">{m.name}</span>
-                  <p className="mt-1 text-sm text-muted">{m.summary}</p>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Container>
-      </section>
+      <HomeHero />
+      <HowItWorks />
+      <Benefits />
+      <FeaturedJobs jobs={featured} />
+      <HomeFaq />
+      <CallToAction />
     </>
   );
 }

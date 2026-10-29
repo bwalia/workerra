@@ -1,9 +1,16 @@
 import type { Metadata } from "next";
-import { marketingModule } from "@/modules/marketing";
-import { ModulePlaceholder } from "@/shared/ui";
+import { About, CallToAction } from "@/modules/marketing";
 
-export const metadata: Metadata = { title: "About" };
+export const metadata: Metadata = {
+  title: "About",
+  description: "Why Workerra exists, how it works and what it values, and what you can use on the site today.",
+};
 
 export default function AboutPage() {
-  return <ModulePlaceholder module={marketingModule} />;
+  return (
+    <>
+      <About />
+      <CallToAction />
+    </>
+  );
 }

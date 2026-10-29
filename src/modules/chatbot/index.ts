@@ -16,7 +16,9 @@ export const chatbotModule: ModuleDescriptor = {
 };
 
 export { ChatEntry } from "./components/ChatEntry";
+export { ChatFaq, ChatGuide } from "./components/ChatGuide";
 export { ChatPanel } from "./components/ChatPanel";
 export { JOURNEYS, JOURNEY_LIST, detectJourney, jobSearchHref } from "./journeys";
 export { MAX_HISTORY_MESSAGES, MAX_PROMPT_LENGTH, SUGGESTED_PROMPTS, chatHref } from "./prompts";
+export { ASK_TOPICS, type AskTopic } from "./topics";
 export type * from "./types";
