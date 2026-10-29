@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { Container } from "@/shared/ui";
+import { Container, Logo } from "@/shared/ui";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,11 +22,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en-GB">
       <body className="flex min-h-screen flex-col">
         <header className="border-b border-slate-200 bg-white">
-          <Container className="flex h-14 items-center justify-between">
-            <Link href="/" className="text-lg font-semibold text-brand-700">
-              Workerra
+          <Container className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-3">
+            <Link href="/" aria-label="Workerra home" className="flex">
+              <Logo />
             </Link>
-            <nav aria-label="Main" className="flex gap-4 text-sm text-slate-600">
+            <nav aria-label="Main" className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
               {NAV.map((n) => (
                 <Link key={n.href} href={n.href} className="hover:text-slate-900">
                   {n.label}
@@ -36,8 +36,25 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           </Container>
         </header>
         <main className="flex-1">{children}</main>
-        <footer className="border-t border-slate-200 bg-white py-6 text-sm text-slate-500">
-          <Container>© {new Date().getFullYear()} Workerra · workerra.uk</Container>
+        <footer className="border-t border-slate-200 bg-white py-10 text-sm text-slate-500">
+          <Container className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
+            <div className="max-w-xs">
+              <Link href="/" aria-label="Workerra home" className="flex">
+                <Logo markClassName="h-7 w-7" />
+              </Link>
+              <p className="mt-3">Two sides, one match. The assistant that brings people and work together.</p>
+            </div>
+            <nav aria-label="Footer" className="grid grid-cols-2 gap-x-10 gap-y-2 sm:grid-cols-3">
+              {NAV.map((n) => (
+                <Link key={n.href} href={n.href} className="hover:text-slate-900">
+                  {n.label}
+                </Link>
+              ))}
+            </nav>
+          </Container>
+          <Container className="mt-8">
+            <p className="border-t border-slate-100 pt-6">© {new Date().getFullYear()} Workerra · workerra.uk</p>
+          </Container>
         </footer>
       </body>
     </html>
