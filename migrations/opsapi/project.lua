@@ -2,7 +2,7 @@
 --
 -- Read by OpsAPI's helper/project-loader.lua and helper/project-migrator.lua
 -- when this directory is mounted at /app/projects/workerra/ inside an OpsAPI
--- container (see Dockerfile.migrations). OpsAPI itself is never changed.
+-- container (see Dockerfile.opsapi). OpsAPI itself is never changed.
 --
 -- `code` keys every row this product writes to OpsAPI's `project_migrations`
 -- table and sets the plugin's API prefix (/api/v2/workerra). It MUST stay

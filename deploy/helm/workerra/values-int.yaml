@@ -8,6 +8,12 @@ host: int.workerra.uk
 vaultSecrets:
   core: workerra/int/core
 
+# Workerra's OpsAPI backend: OFF until the setup in docs/environments.md
+# ("Workerra OpsAPI backend") is done and approved.
+opsapi:
+  enabled: false
+  vaultSecret: workerra/int/opsapi
+
 extraEnv:
   # The int ring's NebulaDB (cluster-internal), as in docs/chatbot-reference.md.
   NEBULA_URL: "http://nebuladb.int.svc.cluster.local:8080"

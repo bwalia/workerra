@@ -44,6 +44,15 @@ spec:
               value: {{ printf "https://%s" .Values.host | quote }}
             - name: PORT
               value: {{ .Values.port | quote }}
+            {{- if .Values.opsapi.enabled }}
+            # This release's OpsAPI backend (templates/opsapi.yaml). OPSAPI_API_KEY
+            # (workerra_jobs: read) comes from workerra-core; until it's there the
+            # app keeps its non-OpsAPI behaviour.
+            - name: OPSAPI_URL
+              value: {{ include "workerra.opsapiUrl" . | quote }}
+            - name: OPSAPI_NAMESPACE
+              value: {{ .Values.opsapi.namespaceSlug | quote }}
+            {{- end }}
             {{- range $name, $value := .Values.extraEnv }}
             - name: {{ $name }}
               value: {{ $value | quote }}

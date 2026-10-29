@@ -1,5 +1,5 @@
 -- Local development only: run by docker-compose.opsapi.yml's `bootstrap` service
--- against its throwaway database. Never copied into an image (Dockerfile.migrations
+-- against its throwaway database. Never copied into an image (Dockerfile.opsapi
 -- ships project.lua, migrations/ and api/ only), never run against a shared OpsAPI.
 --
 -- Creates the `workerra` workspace and prints an opsk_ API key scoped the way
