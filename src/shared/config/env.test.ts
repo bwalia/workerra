@@ -12,6 +12,14 @@ describe("loadServerEnv", () => {
     expect(env.opsapi).toBeNull();
     expect(env.jobshoutApiUrl).toBeNull();
     expect(env.contactEmail).toBeNull();
+    expect(env.sampleJobs).toBe(true);
+  });
+
+  it("serves sample jobs locally by default, elsewhere only when asked, and never in prod", () => {
+    expect(loadServerEnv({ SAMPLE_JOBS: "false" }).sampleJobs).toBe(false);
+    expect(loadServerEnv({ APP_ENV: "int" }).sampleJobs).toBe(false);
+    expect(loadServerEnv({ APP_ENV: "test", SAMPLE_JOBS: "true" }).sampleJobs).toBe(true);
+    expect(loadServerEnv({ APP_ENV: "prod", SAMPLE_JOBS: "true" }).sampleJobs).toBe(false);
   });
 
   it("accepts a single contact email and rejects anything that could inject into mailto:", () => {

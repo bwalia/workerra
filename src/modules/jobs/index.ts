@@ -9,5 +9,8 @@ export const jobsModule: ModuleDescriptor = {
   planned: ["Job listings", "Keyword and location search", "Workplace and contract-type filters", "Job detail pages"],
 };
 
+export { JobDetail } from "./components/JobDetail";
+export { JobSearch } from "./components/JobSearch";
 export { parseJobSearchParams } from "./search-params";
+export { EMPLOYMENT_LABELS, WORKPLACE_LABELS, formatSalary, jobSearchQuery, searchJobs } from "./search";
 export type * from "./types";

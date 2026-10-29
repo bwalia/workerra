@@ -18,10 +18,13 @@ export interface Job {
   employmentType: EmploymentType;
   salary: SalaryRange | null;
   description: string;
+  requirements: string[];
   skills: string[];
   postedAt: string;
   closesAt: string | null;
   status: "draft" | "open" | "closed";
+  /** Built-in test listing, not a real vacancy. */
+  sample?: true;
 }
 
 export interface JobSearchFilters {
@@ -30,4 +33,11 @@ export interface JobSearchFilters {
   workplace: WorkplaceType[];
   employmentType: EmploymentType[];
   page: number;
+}
+
+export interface JobSearchResult {
+  jobs: Job[];
+  total: number;
+  page: number;
+  pageCount: number;
 }
