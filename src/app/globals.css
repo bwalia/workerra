@@ -36,6 +36,25 @@
   }
 
   body {
-    @apply bg-canvas text-ink antialiased;
+    @apply bg-canvas font-sans text-ink antialiased;
+  }
+
+  /* Headings use the display face everywhere, so pages stay consistent without
+     per-component classes. Plus Jakarta Sans has narrow word spaces, which
+     tight tracking closes up further, so open them slightly. Balanced wrapping
+     avoids one-word last lines. */
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+    letter-spacing: -0.01em;
+    word-spacing: 0.08em;
+    text-wrap: balance;
+  }
+
+  p,
+  li,
+  dd {
+    text-wrap: pretty;
   }
 }

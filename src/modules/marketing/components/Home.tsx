@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChatEntry, chatHref } from "@/modules/chatbot";
-import { JobCard, SampleNotice, type Job } from "@/modules/jobs";
-import { Container, Faq, type FaqItem } from "@/shared/ui";
+import { JobCard, SECTOR_LABELS, SampleNotice, type Job, type JobSector } from "@/modules/jobs";
+import { Container, Faq, Photo, type FaqItem, type PhotoId } from "@/shared/ui";
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, LINK } from "./styles";
 
 // Home page sections. The page (src/app/page.tsx) only decides which jobs to feature.
@@ -10,39 +10,55 @@ export const JOB_BRIEF_HREF = chatHref("Help me write a job brief");
 
 export function HomeHero() {
   return (
-    <section className="bg-gradient-to-b from-accent-soft to-canvas py-20">
-      <Container className="flex flex-col items-center text-center">
-        <p className="text-sm font-medium uppercase tracking-wide text-accent">UK jobs and hiring</p>
-        <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
-          Find work or hire — just ask.
-        </h1>
-        <p className="mt-4 max-w-2xl text-lg text-muted">
-          Tell the Workerra assistant what you&rsquo;re after in plain English. Job seekers get pointed to the right roles and
-          help with their CV. Employers get help turning a vacancy into a clear job brief.
-        </p>
-        <div className="mt-8 flex w-full justify-center">
-          <ChatEntry />
+    <section className="bg-gradient-to-b from-accent-soft to-canvas py-16 sm:py-20">
+      <Container className="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
+        <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
+          <p className="text-sm font-medium uppercase tracking-wide text-accent">UK jobs and hiring</p>
+          <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
+            Find work or hire — just ask.
+          </h1>
+          <p className="mt-4 max-w-2xl text-lg text-muted">
+            Tell the Workerra assistant what you&rsquo;re after in plain English. Job seekers get pointed to the right roles
+            and help with their CV. Employers get help turning a vacancy into a clear job brief.
+          </p>
+          <div className="mt-8 flex w-full justify-center lg:justify-start">
+            <ChatEntry />
+          </div>
+          <p className="mt-6 text-sm text-muted">
+            Prefer to browse?{" "}
+            <Link href="/jobs" className={LINK}>
+              Search jobs
+            </Link>{" "}
+            or{" "}
+            <Link href={JOB_BRIEF_HREF} className={LINK}>
+              start a job brief
+            </Link>
+            .
+          </p>
         </div>
-        <p className="mt-6 text-sm text-muted">
-          Prefer to browse?{" "}
-          <Link href="/jobs" className={LINK}>
-            Search jobs
-          </Link>{" "}
-          or{" "}
-          <Link href={JOB_BRIEF_HREF} className={LINK}>
-            start a job brief
-          </Link>
-          .
-        </p>
+        {/* Desktop only: on small screens it would push the assistant below the fold. */}
+        <div className="relative hidden lg:block">
+          <Photo
+            id="hero-office"
+            priority
+            sizes="(min-width: 1280px) 30rem, 26rem"
+            className="aspect-[5/4] w-full rounded-2xl shadow-xl ring-1 ring-line"
+          />
+          <div className="absolute -bottom-5 -left-5 rounded-xl border border-line bg-surface px-4 py-3 shadow-lg">
+            <p className="text-sm font-semibold text-ink">Jobs across the UK</p>
+            <p className="text-xs text-muted">Pay, location and contract up front</p>
+          </div>
+        </div>
       </Container>
     </section>
   );
 }
 
-const STEPS: readonly { audience: string; id: string; steps: readonly { title: string; body: string }[] }[] = [
+const STEPS: readonly { audience: string; id: string; photo: PhotoId; steps: readonly { title: string; body: string }[] }[] = [
   {
     audience: "Looking for work",
     id: "how-candidates",
+    photo: "candidate-laptop",
     steps: [
       {
         title: "Say what you’re looking for",
@@ -61,6 +77,7 @@ const STEPS: readonly { audience: string; id: string; steps: readonly { title: s
   {
     audience: "Hiring",
     id: "how-employers",
+    photo: "employer-interview",
     steps: [
       {
         title: "Describe the vacancy",
@@ -88,26 +105,29 @@ export function HowItWorks() {
         <p className="mt-2 max-w-2xl text-muted">Start with a question. The assistant works out what you need and takes you there.</p>
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           {STEPS.map((group) => (
-            <div key={group.id} className="rounded-lg border border-line bg-surface p-6">
-              <h3 id={group.id} className="text-lg font-semibold text-ink">
-                {group.audience}
-              </h3>
-              <ol aria-labelledby={group.id} className="mt-4 space-y-4">
-                {group.steps.map((step, i) => (
-                  <li key={step.title} className="flex gap-4">
-                    <span
-                      aria-hidden
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent"
-                    >
-                      {i + 1}
-                    </span>
-                    <div>
-                      <p className="font-medium text-ink">{step.title}</p>
-                      <p className="mt-1 text-sm text-body">{step.body}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
+            <div key={group.id} className="overflow-hidden rounded-lg border border-line bg-surface">
+              <Photo id={group.photo} sizes="(min-width: 1152px) 552px, (min-width: 1024px) 50vw, 100vw" className="aspect-[2/1] w-full" />
+              <div className="p-6">
+                <h3 id={group.id} className="text-lg font-semibold text-ink">
+                  {group.audience}
+                </h3>
+                <ol aria-labelledby={group.id} className="mt-4 space-y-4">
+                  {group.steps.map((step, i) => (
+                    <li key={step.title} className="flex gap-4">
+                      <span
+                        aria-hidden
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent"
+                      >
+                        {i + 1}
+                      </span>
+                      <div>
+                        <p className="font-medium text-ink">{step.title}</p>
+                        <p className="mt-1 text-sm text-body">{step.body}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             </div>
           ))}
         </div>
@@ -170,6 +190,52 @@ export function Benefits() {
             </div>
           ))}
         </div>
+      </Container>
+    </section>
+  );
+}
+
+// Photo cards that open /jobs filtered to a sector. A few sectors only; the
+// full list is in the /jobs filters.
+const SECTORS: readonly { sector: JobSector; photo: PhotoId }[] = [
+  { sector: "technology", photo: "team-office" },
+  { sector: "construction", photo: "trades-site" },
+  { sector: "logistics", photo: "hivis-team" },
+  { sector: "marketing", photo: "team-table" },
+];
+
+export function Sectors() {
+  return (
+    <section aria-labelledby="sectors" className="pt-16">
+      <Container>
+        <h2 id="sectors" className="text-2xl font-semibold text-ink">
+          Work in every sector
+        </h2>
+        <p className="mt-2 max-w-2xl text-muted">From offices to building sites. Pick a sector to see its jobs, or search everything.</p>
+        <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {SECTORS.map(({ sector, photo }) => (
+            <li key={sector}>
+              <Link
+                href={`/jobs?sector=${sector}`}
+                className="group block overflow-hidden rounded-lg border border-line bg-surface transition hover:border-brand-500 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+              >
+                <div className="overflow-hidden">
+                  <Photo
+                    id={photo}
+                    sizes="(min-width: 1152px) 270px, (min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
+                    className="aspect-[4/3] w-full transition duration-300 group-hover:scale-105 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+                  />
+                </div>
+                <p className="flex items-center justify-between gap-2 px-4 py-3 font-medium text-ink">
+                  {SECTOR_LABELS[sector]}
+                  <span aria-hidden className="text-accent transition group-hover:translate-x-0.5">
+                    →
+                  </span>
+                </p>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </Container>
     </section>
   );

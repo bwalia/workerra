@@ -10,5 +10,5 @@ export const marketingModule: ModuleDescriptor = {
 };
 
 export { About } from "./components/About";
-export { Benefits, CallToAction, FeaturedJobs, HomeFaq, HomeHero, HowItWorks } from "./components/Home";
+export { Benefits, CallToAction, FeaturedJobs, HomeFaq, HomeHero, HowItWorks, Sectors } from "./components/Home";
 export type * from "./types";

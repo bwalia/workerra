@@ -1,6 +1,8 @@
 export { Container } from "./Container";
 export { Faq, type FaqItem } from "./Faq";
 export { ModulePlaceholder } from "./ModulePlaceholder";
+export { Photo } from "./Photo";
+export type { PhotoId } from "./photos";
 export { Logo, LogoMark } from "./Logo";
 export { SiteFooter } from "./SiteFooter";
 export { SiteHeader } from "./SiteHeader";
