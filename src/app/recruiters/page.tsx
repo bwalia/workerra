@@ -5,5 +5,5 @@ import { ModulePlaceholder } from "@/shared/ui";
 export const metadata: Metadata = { title: "Recruiters" };
 
 export default function RecruitersPage() {
-  return <ModulePlaceholder module={recruitmentModule} />;
+  return <ModulePlaceholder photo="employer-interview" module={recruitmentModule} />;
 }

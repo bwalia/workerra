@@ -46,7 +46,7 @@ export function SiteHeader() {
         </Link>
 
         <nav aria-label="Main" className="hidden md:block">
-          <ul className="flex items-center gap-1">
+          <ul className="flex items-center lg:gap-1">
             {MAIN_NAV.map((n) => {
               const active = isActivePath(pathname, n.href);
               return (
@@ -54,7 +54,7 @@ export function SiteHeader() {
                   <Link
                     href={n.href}
                     aria-current={active ? "page" : undefined}
-                    className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${FOCUS} ${
+                    className={`rounded-full px-2 py-1.5 text-sm font-medium transition lg:px-3 ${FOCUS} ${
                       active ? "bg-accent-soft text-accent" : "text-muted hover:bg-subtle hover:text-ink"
                     }`}
                   >
@@ -72,7 +72,7 @@ export function SiteHeader() {
           <ThemeToggle />
           <Link
             href="/chat"
-            className={`hidden rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 sm:inline-flex ${FOCUS}`}
+            className={`hidden whitespace-nowrap rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 sm:inline-flex ${FOCUS}`}
           >
             Ask the assistant
           </Link>

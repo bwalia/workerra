@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { chatHref } from "@/modules/chatbot";
-import { Container, Faq, type FaqItem } from "@/shared/ui";
+import { Container, Faq, Photo, type FaqItem } from "@/shared/ui";
 import { JOB_BRIEF_HREF } from "./Home";
 import { LINK } from "./styles";
 
@@ -82,15 +82,23 @@ export function About() {
   return (
     <>
       <section className="bg-gradient-to-b from-accent-soft to-canvas py-16">
-        <Container>
-          <p className="text-sm font-medium uppercase tracking-wide text-accent">About Workerra</p>
-          <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-ink">
-            Connecting UK employers with the people they need
-          </h1>
-          <p className="mt-4 max-w-2xl text-lg text-muted">
-            Workerra is a jobs and recruitment platform with an AI assistant at its heart, so getting started is as simple as
-            asking a question, whether you&rsquo;re looking for work or looking to hire.
-          </p>
+        <Container className="grid items-center gap-10 md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)]">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-wide text-accent">About Workerra</p>
+            <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-ink">
+              Connecting UK employers with the people they need
+            </h1>
+            <p className="mt-4 max-w-2xl text-lg text-muted">
+              Workerra is a jobs and recruitment platform with an AI assistant at its heart, so getting started is as simple
+              as asking a question, whether you&rsquo;re looking for work or looking to hire.
+            </p>
+          </div>
+          <Photo
+            id="handshake"
+            priority
+            sizes="(min-width: 1024px) 28rem, (min-width: 768px) 22rem, 100vw"
+            className="aspect-[3/2] w-full rounded-2xl shadow-lg ring-1 ring-line"
+          />
         </Container>
       </section>
 

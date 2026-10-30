@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { SiteFooter, SiteHeader, THEME_SCRIPT } from "@/shared/ui";
+import { fontDisplay, fontSans } from "@/shared/ui/fonts";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,7 +19,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     // The theme script sets .dark on <html> before React hydrates, hence suppressHydrationWarning.
-    <html lang="en-GB" suppressHydrationWarning>
+    <html lang="en-GB" className={`${fontSans.variable} ${fontDisplay.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>

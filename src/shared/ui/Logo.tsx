@@ -29,7 +29,7 @@ export function Logo({ className = "", markClassName }: { className?: string; ma
   return (
     <span className={`inline-flex items-center gap-2 ${className}`}>
       <LogoMark className={markClassName} />
-      <span className="text-lg font-semibold tracking-tight text-ink">
+      <span className="font-display text-lg font-bold tracking-tight text-ink">
         Work<span className="text-brand-600 dark:text-accent">erra</span>
       </span>
     </span>
