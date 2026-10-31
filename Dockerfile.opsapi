@@ -1,0 +1,25 @@
+# OpsAPI with Workerra's plugin baked in: the image the dedicated Workerra OpsAPI
+# backend runs (deploy/helm/workerra/templates/opsapi.yaml), published as
+# bwalia/workerra-opsapi:<sha>. Same approach as closeknitty's opsapi/Dockerfile
+# and diy-tax-return-uk's Dockerfile.migrations: the public OpsAPI image supplies
+# lapis and helper.project-migrator, and the plugin sits at
+# /app/projects/workerra/, where OpsAPI's plugin loader and migrator find it.
+# docker-compose.opsapi.yml mounts the working copy there instead.
+#
+# OPSAPI_TAG pins the base. The workflow sets it (OPSAPI_BASE_TAG); it must be a
+# release that ships the ATS feature (ats_jobs), which the plugin extends.
+ARG OPSAPI_TAG=latest
+FROM docker.io/bwalia/opsapi:${OPSAPI_TAG}
+
+COPY migrations/opsapi/project.lua  /app/projects/workerra/project.lua
+COPY migrations/opsapi/migrations   /app/projects/workerra/migrations
+# Workerra's endpoints (/api/v2/workerra/*). dev/ (local bootstrap) is left out.
+COPY migrations/opsapi/api          /app/projects/workerra/api
+
+# Fail the build, not the deploy, if the loader couldn't find the files.
+RUN test -f /app/projects/workerra/project.lua \
+ && ls /app/projects/workerra/migrations/*.lua /app/projects/workerra/api/*.lua > /dev/null \
+ && test ! -e /app/projects/workerra/dev
+
+# Base image entrypoint kept: the container serves OpsAPI, and
+# `lapis exec ...` / `lapis migrate` work for the setup step.

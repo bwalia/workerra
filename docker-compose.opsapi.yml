@@ -3,7 +3,7 @@
 #
 #   postgres            pgvector Postgres (OpsAPI's migrations need pgvector + pgcrypto)
 #   opsapi-migrate      OpsAPI's own migrations, every module (PROJECT_CODE=all, as INT)
-#   workerra-migrations Workerra's plugin migrations (Dockerfile.migrations)
+#   workerra-migrations Workerra's plugin migrations (Dockerfile.opsapi)
 #   opsapi              an OpsAPI server with the plugin mounted, on http://localhost:4041,
 #                       so Workerra's /jobs can search it (profile: server)
 #   bootstrap           creates the workerra workspace and prints an API key (profile: server)
@@ -57,10 +57,10 @@ services:
   workerra-migrations:
     build:
       context: .
-      dockerfile: Dockerfile.migrations
+      dockerfile: Dockerfile.opsapi
       args:
         OPSAPI_TAG: ${OPSAPI_TAG:-latest}
-    image: workerra-opsapi-migrations:local
+    image: workerra-opsapi:local
     platform: linux/amd64
     depends_on:
       opsapi-migrate: { condition: service_completed_successfully }

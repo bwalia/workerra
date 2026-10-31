@@ -32,6 +32,39 @@ vaultSecrets:
   # NEBULA_API_KEY, OPSAPI_API_KEY, ...
   core: workerra/int/core
 
+# Workerra's own OpsAPI backend (templates/opsapi.yaml, opsapi-postgres.yaml):
+# the job listings /jobs searches. Off by default. Turning it on needs the steps
+# in docs/environments.md ("Workerra OpsAPI backend"), including the Vault path
+# below and, for search, OPSAPI_API_KEY in vaultSecrets.core.
+opsapi:
+  enabled: false
+  image:
+    # Dockerfile.opsapi, built and pushed with the web image (same tag).
+    repository: bwalia/workerra-opsapi
+    tag: ""
+  # Migrations and features this OpsAPI runs: core plus the ATS.
+  projectCode: core_only,ats
+  # The tenant setup-namespace creates (named by namespaceName/Slug).
+  tenantProjectCode: core_only
+  namespaceName: Workerra
+  namespaceSlug: workerra
+  # POSTGRES_PASSWORD, JWT_SECRET_KEY, OPENSSL_SECRET_KEY, ADMIN_EMAIL, ADMIN_PASSWORD
+  vaultSecret: workerra/int/opsapi
+  networkPolicy: true
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  postgres:
+    image: pgvector/pgvector:pg14
+    port: 5432
+    database: workerra_opsapi
+    user: workerra
+    storage: 10Gi
+    storageClass: local-path
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 1Gi }
+
 # Plain, non-secret env (e.g. in-cluster service URLs).
 extraEnv: {}
 

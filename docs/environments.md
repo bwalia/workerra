@@ -85,6 +85,66 @@ None of this is done yet.
    the pod still starts (the Secret is optional) and the assistant reports offline.
    The ESO token's policy must allow reading `workerra/*`.
 
+## Workerra OpsAPI backend
+
+> **Status: off everywhere.** `opsapi.enabled` is `false` in the chart and in
+> `values-int.yaml`, and the deploy switch above is off too. Nothing below has been done.
+
+Workerra runs its **own** OpsAPI for job listings, the same way CloseKnitty runs
+`closeknitty-opsapi`. The shared Workstation OpsAPI (`workstation-opsapi`) is not
+used and must not be changed for Workerra.
+
+| Piece | What | Where |
+|---|---|---|
+| Image | `bwalia/opsapi:<OPSAPI_BASE_TAG>` + the plugin (`migrations/opsapi/`) | `Dockerfile.opsapi` → `bwalia/workerra-opsapi:<sha>`, built by `deploy-k3s.yml` with the web image |
+| OpsAPI | `workerra-opsapi` Deployment + ClusterIP Service, one replica | `templates/opsapi.yaml` |
+| Setup | initContainer on every start: `lapis migrate` (`PROJECT_CODE=core_only,ats`), the `workerra` workspace, the plugin's migrations. All idempotent | `templates/opsapi.yaml` |
+| Database | `workerra-opsapi-postgres` StatefulSet (pgvector, `local-path` 10Gi) | `templates/opsapi-postgres.yaml` |
+| Access | No Ingress. NetworkPolicies admit only the Workerra web pods to OpsAPI, and only OpsAPI to Postgres | `templates/opsapi.yaml` |
+| Web app | `OPSAPI_URL` (in-cluster) and `OPSAPI_NAMESPACE` set automatically when enabled; `OPSAPI_API_KEY` from `workerra/<ring>/core` | `templates/deployment.yaml` |
+
+### Turning it on for INT (each step needs Balinder's approval)
+
+1. **Pipeline prerequisites:** the one-off setup above is done and
+   `WORKERRA_DEPLOY_ENABLED=true`. The first build pushes `bwalia/workerra-opsapi`
+   (Docker Hub creates the public repo on first push; the image holds no secrets).
+2. **OpsAPI's own secrets** at WSL Vault `workerra/int/opsapi`: `POSTGRES_PASSWORD`,
+   `JWT_SECRET_KEY`, `OPENSSL_SECRET_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, all
+   newly generated for this backend, never copied from another OpsAPI. Check the
+   ESO token's policy can read `workerra/*`.
+3. **Enable:** set `opsapi.enabled: true` in `values-int.yaml`, merge, and let
+   Ring Promoter deploy. The `setup` initContainer migrates and creates the
+   workspace. Postgres pins itself to the node it first lands on.
+4. **API key for the web app:** an `opsk_` key in the `workerra` workspace scoped
+   to `workerra_jobs: ["read"]` only. The backend has no SMTP, so mint it inside the
+   pod (the same calls as `migrations/opsapi/dev/bootstrap.lua`) rather than through
+   a dashboard sign-in. It prints once; put it straight into Vault as
+   `OPSAPI_API_KEY` at `workerra/int/core`, never into a terminal log or chat:
+
+   ```bash
+   kubectl -n int exec deploy/workerra-opsapi -c opsapi -- lapis exec "
+     local ns = require('lapis.db').select('id FROM namespaces WHERE slug = ?', 'workerra')[1]
+     local raw, prefix, hash = require('helper.api-key').generate()
+     require('queries.ApiKeyQueries').create({ namespace_id = ns.id, name = 'workerra-web',
+       key_prefix = prefix, key_hash = hash, scopes = require('cjson').encode({ workerra_jobs = { 'read' } }) })
+     print(raw)"
+   ```
+
+   ESO syncs it within a minute; then restart the web pods
+   (`kubectl -n int rollout restart deploy/workerra`). Until the key is there the
+   site keeps its non-OpsAPI behaviour. Revoke a key from the OpsAPI dashboard
+   (port-forward `svc/workerra-opsapi`) or `ApiKeyQueries.revoke`.
+5. **Listings:** seed samples (`npm run seed:opsapi -- --allow-remote` through the
+   port-forward, with a separate key that can create ATS jobs; shown only where
+   `SAMPLE_JOBS=true`), or publish real ATS jobs with `PUT /api/v2/workerra/jobs/:uuid/listing`.
+
+TEST, ACC and PROD repeat this with their own values file, Vault paths and keys.
+PROD's secrets go in the prod-only Vault tenant, and its key is minted there,
+never copied from a non-prod ring.
+
+**Upgrading OpsAPI:** bump `OPSAPI_BASE_TAG` in `deploy-k3s.yml` (it must ship the
+ATS feature) and check the plugin with `docker-compose.opsapi.yml` first.
+
 ## VPN-only access for INT/TEST/ACC
 
 Same pattern as `int.jobshout.com` / `int.closeknitty.com`

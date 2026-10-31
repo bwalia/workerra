@@ -97,9 +97,12 @@ taken from `bwalia/diy-tax-return-uk` `migrations/opsapi/`:
 - **Custom endpoints:** the same plugin's `api/*.lua`, mounted by OpsAPI's
   project loader under `/api/v2/workerra/*` (it refuses to replace core routes).
   Their types come from the server's `/openapi.json`.
-- **Delivery:** an image `FROM bwalia/opsapi:<tag>` that copies the plugin to
-  `/app/projects/workerra/` and runs `helper.project-migrator` as a Helm
-  pre-upgrade hook after OpsAPI's own migrations.
+- **Delivery:** Workerra's own OpsAPI backend, as CloseKnitty does: the image
+  `bwalia/workerra-opsapi` (`Dockerfile.opsapi`, `FROM bwalia/opsapi:<tag>` plus the
+  plugin at `/app/projects/workerra/`) runs in the Workerra Helm release with its
+  own Postgres, migrating in an initContainer. Off until enabled per ring; see
+  [environments.md](environments.md#workerra-opsapi-backend). The shared
+  Workstation OpsAPI is not used.
 - **Job listings (live):** `/jobs`, job pages and the home page's latest jobs
   search ATS jobs published through the plugin (`workerra_job_listings`,
   `GET /api/v2/workerra/jobs`), when `OPSAPI_*` is set. Filtering and paging run in

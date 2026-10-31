@@ -33,9 +33,10 @@ returned with `include_samples=true`, which Workerra sends only where
 
 Workerra's server calls these through `@opsapi/client` (`src/modules/jobs/sources.ts`),
 with types in `src/modules/jobs/opsapi-types.ts` that mirror the `sdk.doc`
-descriptions in `api/jobs.lua`: change both together. The OpsAPI deployment that
-serves Workerra must have the ATS feature on and the plugin installed
-(`Dockerfile.migrations` copies `api/` as well as the migrations).
+descriptions in `api/jobs.lua`: change both together. In the cluster this runs in
+Workerra's own OpsAPI backend (`Dockerfile.opsapi` → `bwalia/workerra-opsapi`, with
+the ATS feature on), off until enabled per ring: see
+[docs/environments.md](../../docs/environments.md#workerra-opsapi-backend).
 
 Applied migrations are tracked in OpsAPI's `project_migrations` table under
 `project_code = 'workerra'`, separate from OpsAPI's own `lapis_migrations`.
