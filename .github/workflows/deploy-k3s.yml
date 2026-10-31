@@ -177,15 +177,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Register vhost (idempotent)
         env:
-          WSLPROXY_USER: ${{ secrets.WSLPROXY_USER }}
+          WSLPROXY_USERNAME: ${{ secrets.WSLPROXY_USERNAME }}
           WSLPROXY_PASSWORD: ${{ secrets.WSLPROXY_PASSWORD }}
           GW: ${{ secrets.WSLPROXY_BASE_URL }}
         run: |
           set -euo pipefail
-          [ -n "${WSLPROXY_USER:-}" ] && [ -n "${WSLPROXY_PASSWORD:-}" ] && [ -n "${GW:-}" ] \
-            || { echo "::error::Secrets WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_BASE_URL must be set"; exit 1; }
+          [ -n "${WSLPROXY_USERNAME:-}" ] && [ -n "${WSLPROXY_PASSWORD:-}" ] && [ -n "${GW:-}" ] \
+            || { echo "::error::Secrets WSLPROXY_USERNAME / WSLPROXY_PASSWORD / WSLPROXY_BASE_URL must be set"; exit 1; }
           TOKEN=$(curl -fsS --max-time 30 -X POST "$GW/api/user/login" -H "Content-Type: application/json" \
-            -d "$(jq -nc --arg e "$WSLPROXY_USER" --arg p "$WSLPROXY_PASSWORD" '{email:$e,password:$p}')" \
+            -d "$(jq -nc --arg e "$WSLPROXY_USERNAME" --arg p "$WSLPROXY_PASSWORD" '{email:$e,password:$p}')" \
             | jq -r '.data.accessToken')
           [ -n "$TOKEN" ] && [ "$TOKEN" != null ] || { echo "::error::wslproxy login failed"; exit 1; }
           echo "::add-mask::$TOKEN"

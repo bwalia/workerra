@@ -73,7 +73,7 @@ None of this is done yet.
    `first_time_contributors`): the repo is public and `ci.yml` runs on PRs.
 2. **Repository secrets** (CI credentials only):
    - `CLOUDFLARE_API_TOKEN`: Zone:Read + DNS:Edit on `workerra.uk`.
-   - `WSLPROXY_USER`, `WSLPROXY_PASSWORD`, `WSLPROXY_BASE_URL`.
+   - `WSLPROXY_USERNAME`, `WSLPROXY_PASSWORD`, `WSLPROXY_BASE_URL`.
    - `DOCKER_USERNAME`, `DOCKER_PASSWD`: push to `bwalia/workerra`.
    - `RP_API_TOKEN`: workstation Ring Promoter API token.
    - `KUBE_CONFIG_DATA_K3S`: base64 kubeconfig for k3s1.
