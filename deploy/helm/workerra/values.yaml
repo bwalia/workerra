@@ -13,7 +13,7 @@ env: int
 host: int.workerra.uk
 
 image:
-  repository: bwalia/workerra
+  repository: harneetk78/workerra
   # Set by the deploy workflow: --set image.tag=<short sha>. Also exported as
   # APP_VERSION, which /api/health reports and Ring Promoter verifies.
   tag: latest

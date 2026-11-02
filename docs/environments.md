@@ -25,9 +25,9 @@ test fails if any ring other than prod is marked public or indexable.
 Modelled on `bwalia/opsapi` and `bwalia/closeknitty` `deploy-k3s.yml`:
 
 ```
-push to main ─▶ check ─▶ DNS ─▶ edge vhost ─▶ build & push bwalia/workerra:<sha> ─▶ seed Ring Promoter (int)
-                                                                                         │
-Ring Promoter ◀──────────────────────────────────────────────────────────────────────────┘
+push to main ─▶ check ─▶ DNS ─▶ edge vhost ─▶ build & push harneetk78/workerra:<sha> ─▶ seed Ring Promoter (int)
+                                                                                            │
+Ring Promoter ◀─────────────────────────────────────────────────────────────────────────────┘
    └─ dispatches deploy-k3s.yml (TARGET_ENV=int, DEPLOYMENT_TYPE=deploy, IMAGE_TAG=<sha>)
         └─ DNS ─▶ edge vhost ─▶ helm upgrade workerra (namespace = ring) ─▶ RP checks /api/health data.version == <sha>
 ```
@@ -74,7 +74,8 @@ None of this is done yet.
 2. **Repository secrets** (CI credentials only):
    - `CLOUDFLARE_API_TOKEN`: Zone:Read + DNS:Edit on `workerra.uk`.
    - `WSLPROXY_USERNAME`, `WSLPROXY_PASSWORD`, `WSLPROXY_BASE_URL`.
-   - `DOCKER_USERNAME`, `DOCKER_PASSWD`: push to `bwalia/workerra`.
+   - `DOCKER_USERNAME`, `DOCKER_PASSWD`: push to the Docker Hub repository `harneetk78/workerra`
+     (username `harneetk78` plus a Read & Write access token from that same account).
    - `RP_API_TOKEN`: workstation Ring Promoter API token.
    - `KUBE_CONFIG_DATA_K3S`: base64 kubeconfig for k3s1.
 3. **Ring Promoter app** `workerra` in `bwalia/ring-promoter`

@@ -65,7 +65,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: bwalia/workerra
+  IMAGE: harneetk78/workerra
   CHART: deploy/helm/workerra
   RELEASE: workerra
   DNS_ZONE: workerra.uk
