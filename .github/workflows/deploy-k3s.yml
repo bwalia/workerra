@@ -243,39 +243,39 @@ jobs:
             ${{ env.IMAGE }}:latest
 
   # ─── 5. Hand the new version to Ring Promoter ──────────────────────────────
-  # Ring Promoter dispatches the deploy below for int and verifies /api/health
-  # reports the tag. Promotion beyond int stays a human act in the RP UI.
+  # Ring Promoter dispatches the deploy below for int, then checks /api/health
+  # reports the tag (with its own retries) before it records int on that version.
+  # So this job only hands the version over, as workstation-opsapi's seed does:
+  # the deploy's outcome is the dispatched run and the RP job, linked below.
+  # Promotion beyond int stays a human act in the RP UI.
   seed:
     name: Seed Ring Promoter (int)
     needs: [build]
     if: vars.WORKERRA_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && needs.build.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     steps:
-      - name: Seed int and wait until it is healthy
+      - name: Seed int
         env:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
           TAG: ${{ needs.build.outputs.tag }}
         run: |
           set -euo pipefail
           [ -n "${RP_API_TOKEN:-}" ] || { echo "::error::Secret RP_API_TOKEN is not set: $TAG is pushed but NOT deploying. Seed it by hand at $RP_URL/?app=workerra"; exit 1; }
-          code=$(curl -sS -o seed.out -w '%{http_code}' -X POST "$RP_URL/api/apps/workerra/seed?async=1" \
+          # async: 202 + a job id now. RP still rejects, on this request, a seed
+          # that could never work (unknown ring or version, closed gate).
+          : > seed.out
+          code=$(curl -sS --max-time 60 -o seed.out -w '%{http_code}' -X POST "$RP_URL/api/apps/workerra/seed?async=1" \
             -H "Authorization: Bearer $RP_API_TOKEN" -H 'Content-Type: application/json' \
             -d "{\"ring\":\"int\",\"version\":\"$TAG\"}") || code=000
           echo "seed -> HTTP $code :: $(head -c 500 seed.out)"
-          case "$code" in 200|202) ;; *) echo "::error::Ring Promoter seed failed"; exit 1 ;; esac
-          echo "Track: $RP_URL/?app=workerra"
-          for i in $(seq 1 100); do
-            state=$(curl -sS -H "Authorization: Bearer $RP_API_TOKEN" "$RP_URL/api/apps/workerra/rings" \
-              | python3 -c 'import json,sys
-          for r in json.load(sys.stdin).get("rings") or []:
-              if (r.get("ring") or {}).get("name") == "int":
-                  print(r.get("current_version") or "", "healthy" if r.get("healthy") else "unhealthy")' || true)
-            echo "[$i] int: ${state:-unknown}"
-            [ "$state" = "$TAG healthy" ] && { echo "int is on $TAG and healthy"; exit 0; }
-            sleep 15
-          done
-          echo "::error::int did not reach $TAG and healthy within 25m"; exit 1
+          case "$code" in
+            200|202) ;;
+            000) echo "::error::could not reach $RP_URL: $TAG is pushed but NOT deploying. Seed it by hand at $RP_URL/?app=workerra"; exit 1 ;;
+            *) echo "::error::Ring Promoter rejected the seed (HTTP $code). $TAG is pushed and can be seeded by hand once fixed."; exit 1 ;;
+          esac
+          job=$(jq -r '.job_id // empty' seed.out 2>/dev/null || true)
+          echo "::notice::Ring Promoter is deploying $TAG to int${job:+ (job $job)}. Status: $RP_URL/?app=workerra${job:+ (API: $RP_URL/api/apps/workerra/jobs/$job)}. The deploy itself is the 'Helm deploy (int)' run RP dispatches in this repo's Actions tab."
 
   # ─── 6. Helm deploy (dispatched by Ring Promoter, or by hand) ──────────────
   deploy:
@@ -296,7 +296,11 @@ jobs:
       VALUES: ${{ needs.ring.outputs.values }}
     steps:
       - uses: actions/checkout@v4
+      # Pinned, not `latest`: a new Helm major changed what --wait means under us
+      # once already (Helm 4 waits on every resource, ExternalSecrets included).
       - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.1
       - uses: azure/setup-kubectl@v4
       - name: Resolve image tag
         run: |
@@ -320,18 +324,69 @@ jobs:
       - name: helm upgrade
         run: |
           set -euo pipefail
+          # Pod-template generation before the upgrade: if helm doesn't change it
+          # (same tag, values-only change), the next step restarts the pods so
+          # they pick up the current Vault Secret.
+          GEN=$(kubectl -n "$TARGET_ENV" get deploy/"$RELEASE" -o jsonpath='{.metadata.generation}' 2>/dev/null || echo 0)
+          echo "GEN_BEFORE=${GEN:-0}" >> "$GITHUB_ENV"
           echo "Deploying $IMAGE:$TAG to $TARGET_ENV ($VALUES)"
+          # No --wait, as workstation-opsapi does. In Helm 4, `--wait` means the
+          # kstatus watcher, which also waits for every ExternalSecret to be Ready:
+          # a missing optional Vault path then failed the release although the pod
+          # was serving (runs 41485637372, 41655371756). Readiness is checked
+          # explicitly below instead.
           helm upgrade --install "$RELEASE" "$CHART" \
             --namespace "$TARGET_ENV" -f "$VALUES" \
             --set image.tag="$TAG" \
-            --wait --timeout 10m
+            --timeout 10m
+      - name: Wait for Vault secrets (optional, warn only)
+        run: |
+          # The chart loads every workerra-<name> Secret with optional: true, so a
+          # Vault path that doesn't exist yet only disables the integrations that
+          # need it. Report it, don't fail the deploy over it.
+          for es in $(kubectl -n "$TARGET_ENV" get externalsecret -l app.kubernetes.io/part-of=workerra -o name); do
+            if kubectl -n "$TARGET_ENV" wait --for=condition=Ready "$es" --timeout=90s >/dev/null; then
+              echo "$es: synced"
+            else
+              reason=$(kubectl -n "$TARGET_ENV" get "$es" -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')
+              key=$(kubectl -n "$TARGET_ENV" get "$es" -o jsonpath='{.spec.dataFrom[0].extract.key}')
+              echo "::warning::$es is not synced (${reason:-unknown}): Vault path $key is missing or unreadable; the app runs without it"
+            fi
+          done
+      - name: Roll out and verify
+        run: |
+          set -euo pipefail
+          GEN_AFTER=$(kubectl -n "$TARGET_ENV" get deploy/"$RELEASE" -o jsonpath='{.metadata.generation}')
+          if [ "${GEN_BEFORE:-0}" = "$GEN_AFTER" ]; then
+            echo "Pod template unchanged (generation $GEN_AFTER): restarting so pods load the current Secret"
+            kubectl -n "$TARGET_ENV" rollout restart deploy/"$RELEASE"
+          fi
+          # maxUnavailable 0: if the new pods never turn Ready, the old ones keep serving.
+          kubectl -n "$TARGET_ENV" rollout status deploy/"$RELEASE" --timeout=5m
           kubectl -n "$TARGET_ENV" get pods -l app.kubernetes.io/part-of=workerra -o wide
+          running=$(kubectl -n "$TARGET_ENV" get deploy/"$RELEASE" -o jsonpath='{.spec.template.spec.containers[0].image}')
+          [ "$running" = "$IMAGE:$TAG" ] || { echo "::error::Deployment runs $running, expected $IMAGE:$TAG"; exit 1; }
+          echo "Deployment image: $running"
+          # The same check Ring Promoter makes, from inside the cluster (no VPN or
+          # DNS involved), through the Service. Retried briefly because a pod of
+          # the old ReplicaSet can still be leaving the endpoints; after that,
+          # unreachable or the wrong version fails the deploy.
+          for i in 1 2 3 4 5 6; do
+            body=$(kubectl get --raw "/api/v1/namespaces/$TARGET_ENV/services/$RELEASE:80/proxy/api/health" 2>/dev/null) || body=""
+            version=$(echo "${body:-null}" | jq -r '.data.version // empty' 2>/dev/null || true)
+            echo "[$i] in-cluster /api/health: status=$(echo "${body:-null}" | jq -r '.data.status // "unreachable"' 2>/dev/null || echo unreachable) version=${version:-none}"
+            [ "$version" = "$TAG" ] && break
+            [ "$i" = 6 ] && { echo "::error::/api/health did not report version $TAG (last: '${version:-unreachable}')"; exit 1; }
+            sleep 5
+          done
       - name: Diagnostics on failure
         if: failure()
         run: |
+          helm -n "$TARGET_ENV" history "$RELEASE" --max 5 || true
           kubectl -n "$TARGET_ENV" get pods -l app.kubernetes.io/part-of=workerra -o wide || true
           kubectl -n "$TARGET_ENV" get externalsecret -l app.kubernetes.io/part-of=workerra || true
           kubectl -n "$TARGET_ENV" describe deploy/"$RELEASE" | tail -30 || true
+          kubectl -n "$TARGET_ENV" get events --sort-by=.lastTimestamp | grep -i workerra | tail -20 || true
           kubectl -n "$TARGET_ENV" logs deploy/"$RELEASE" --tail=60 || true
       - name: Probe through the edge (informational)
         env:
