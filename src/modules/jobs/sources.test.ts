@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ApiJob } from "./opsapi-types";
-import { SAMPLE_JOBS } from "./sample-jobs";
 import { parseJobSearchParams } from "./search-params";
-import { fromApiJob, opsApiJobSource, sampleJobSource } from "./sources";
+import { fromApiJob, opsApiJobSource } from "./sources";
 
 const UUID = "063e7f73-2579-498a-958b-7ea389e0ab1c";
 
 const apiJob = (over: Partial<ApiJob> = {}): ApiJob => ({
   uuid: UUID,
   title: "Staff Nurse",
-  company: "Aire Valley Health Trust (Sample)",
+  company: "Aire Valley Health Trust",
   location: "Leeds",
   workplace: "onsite",
   employment_type: "full_time",
@@ -22,25 +21,24 @@ const apiJob = (over: Partial<ApiJob> = {}): ApiJob => ({
   skills: ["Nursing"],
   posted_at: "2026-10-29",
   closes_at: null,
-  sample: true,
   ...over,
 });
 
 /** A fetch that records each request and answers from `respond`. */
 function fakeFetch(respond: (url: URL) => { status?: number; body: unknown }) {
-  const calls: { url: URL; headers: Headers }[] = [];
+  const calls: { url: URL; method: string; headers: Headers; body: string }[] = [];
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = input instanceof Request ? input : new Request(input, init);
     const url = new URL(req.url);
-    calls.push({ url, headers: req.headers });
+    calls.push({ url, method: req.method, headers: req.headers, body: await req.text() });
     const { status = 200, body } = respond(url);
     return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   };
   return { fetch: fetch as typeof globalThis.fetch, calls };
 }
 
-const source = (fetch: typeof globalThis.fetch, includeSamples = true) =>
-  opsApiJobSource({ url: "http://opsapi.test", namespace: "workerra", apiKey: "opsk_test", includeSamples, fetch });
+const source = (fetch: typeof globalThis.fetch) =>
+  opsApiJobSource({ url: "http://opsapi.test", namespace: "workerra", apiKey: "opsk_test", fetch });
 
 const page = (data: ApiJob[], meta: Partial<{ page: number; total: number; total_pages: number }> = {}) => ({
   success: true,
@@ -62,7 +60,6 @@ describe("opsApiJobSource", () => {
       sector: "healthcare",
       workplace: "onsite,remote",
       type: "full_time",
-      include_samples: "true",
       page: "2",
       per_page: "10",
     });
@@ -70,17 +67,17 @@ describe("opsApiJobSource", () => {
     expect([headers.get("x-namespace-slug"), headers.get("x-namespace-id")]).toContain("workerra");
   });
 
-  it("leaves out empty filters and asks for samples only where they're allowed", async () => {
+  it("leaves out empty filters", async () => {
     const { fetch, calls } = fakeFetch(() => ({ body: page([]) }));
-    await source(fetch, false).search(parseJobSearchParams({}), 3);
-    expect(Object.fromEntries(calls[0].url.searchParams)).toEqual({ include_samples: "false", page: "1", per_page: "3" });
+    await source(fetch).search(parseJobSearchParams({}), 3);
+    expect(Object.fromEntries(calls[0].url.searchParams)).toEqual({ page: "1", per_page: "3" });
   });
 
   it("maps results and paging", async () => {
     const { fetch } = fakeFetch(() => ({ body: page([apiJob()], { page: 1, total: 14, total_pages: 2 }) }));
     const result = await source(fetch).search(parseJobSearchParams({}));
     expect(result).toMatchObject({ total: 14, page: 1, pageCount: 2 });
-    expect(result.jobs[0]).toMatchObject({ id: UUID, title: "Staff Nurse", sample: true, employmentType: "full_time" });
+    expect(result.jobs[0]).toMatchObject({ id: UUID, title: "Staff Nurse", employmentType: "full_time" });
   });
 
   it("falls back to the last page when asked for one past the end", async () => {
@@ -101,7 +98,7 @@ describe("opsApiJobSource", () => {
     );
     expect((await source(fetch).find(UUID))?.id).toBe(UUID);
     expect(await source(fetch).find("4b0c9b0e-0000-4000-8000-000000000000")).toBeNull();
-    expect(await source(fetch).find("sample-staff-nurse-leeds")).toBeNull();
+    expect(await source(fetch).find("staff-nurse-leeds")).toBeNull();
     expect(calls).toHaveLength(2); // the non-uuid id never reaches OpsAPI
   });
 
@@ -120,12 +117,10 @@ describe("opsApiJobSource", () => {
 });
 
 describe("fromApiJob", () => {
-  it("drops empty optional lists and keeps the sample label", () => {
+  it("drops empty optional lists", () => {
     const job = fromApiJob(apiJob())!;
     expect(job.responsibilities).toBeUndefined();
     expect(job.benefits).toEqual(["NHS Pension"]);
-    expect(job.sample).toBe(true);
-    expect(fromApiJob(apiJob({ sample: false }))!.sample).toBeUndefined();
   });
 
   it("skips listings whose ATS employment type Workerra doesn't know", () => {
@@ -133,11 +128,31 @@ describe("fromApiJob", () => {
   });
 });
 
-describe("sampleJobSource", () => {
-  it("searches the built-in listings and finds open ones by id", async () => {
-    const samples = sampleJobSource();
-    expect((await samples.search(parseJobSearchParams({ sector: "technology" }))).total).toBe(2);
-    expect((await samples.find(SAMPLE_JOBS[0].id))?.title).toBe(SAMPLE_JOBS[0].title);
-    expect(await samples.find("nope")).toBeNull();
+describe("apply", () => {
+  const application = { name: "Jo Bloggs", email: "jo@example.com", cover_letter: "Hello", links: ["https://example.com/cv"] };
+
+  it("posts the application to the job's listing", async () => {
+    const { fetch, calls } = fakeFetch(() => ({ status: 201, body: { success: true, data: { uuid: "a", stage: "applied" } } }));
+    expect(await source(fetch).apply(UUID, application)).toEqual({ status: "applied" });
+    expect(calls[0]).toMatchObject({ method: "POST" });
+    expect(calls[0].url.pathname).toBe(`/api/v2/workerra/jobs/${UUID}/applications`);
+    expect(JSON.parse(calls[0].body)).toEqual(application);
+    expect(calls[0].headers.get("authorization")).toBe("Bearer opsk_test");
+  });
+
+  it("tells a closed job, a repeat application and invalid fields apart", async () => {
+    const answer = (status: number, body: unknown) => fakeFetch(() => ({ status, body })).fetch;
+    expect(await source(answer(404, { success: false, error: "Job not found" })).apply(UUID, application)).toEqual({ status: "not_found" });
+    expect(await source(answer(409, { success: false, error: "dup" })).apply(UUID, application)).toEqual({ status: "duplicate" });
+    expect(
+      await source(answer(422, { success: false, error: "Validation failed", details: { email: "must be an email address" } })).apply(UUID, application),
+    ).toEqual({ status: "invalid", errors: { email: "must be an email address" } });
+    await expect(source(answer(500, { success: false, error: "boom" })).apply(UUID, application)).rejects.toThrow();
+  });
+
+  it("never sends an application for an id that can't be a job", async () => {
+    const { fetch, calls } = fakeFetch(() => ({ body: {} }));
+    expect(await source(fetch).apply("../../admin", application)).toEqual({ status: "not_found" });
+    expect(calls).toHaveLength(0);
   });
 });

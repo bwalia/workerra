@@ -21,7 +21,7 @@ const APPROACH: readonly { title: string; body: string }[] = [
   },
   {
     title: "Built in the open",
-    body: "We say what works today and what doesn’t yet. Features that are still being built are labelled, and test data is marked as a sample.",
+    body: "We say what works today and what doesn’t yet. Features that are still being built are labelled as planned.",
   },
 ];
 
@@ -36,13 +36,15 @@ const LIVE: readonly string[] = [
   "The Workerra assistant, for job searches, career questions, CV help and job briefs",
   "Job search with keyword, location, sector, workplace and contract-type filters",
   "Job detail pages with responsibilities, requirements and pay where the listing gives them",
+  "Applying for a job from its page, with a cover letter and links to your CV, no account needed",
+  "Recruiter sign-in to post jobs, close them and read the applications",
 ];
 
 const COMING: readonly { label: string; href: string }[] = [
   { label: "Candidate profiles and CV upload", href: "/candidates" },
-  { label: "Applying for jobs and tracking applications", href: "/applications" },
+  { label: "Tracking your applications", href: "/applications" },
   { label: "Job alerts from a search or the assistant", href: "/alerts" },
-  { label: "Recruiter accounts, job posting and a hiring pipeline", href: "/recruiters" },
+  { label: "A hiring pipeline board for recruiters", href: "/recruiters/pipeline" },
 ];
 
 // Built on render, not at import: JSX at module scope breaks importing this file in tests.
@@ -60,8 +62,8 @@ const aboutFaq = (): readonly FaqItem[] => [
     question: "Are the jobs on Workerra real?",
     answer: (
       <p>
-        Live vacancies aren&rsquo;t published yet. Where you see listings marked Sample, they are test data with made-up
-        employers.
+        Yes. Every listing is published by the employer or recruiter hiring for it, and you apply to them directly
+        through Workerra.
       </p>
     ),
   },
@@ -169,7 +171,7 @@ export function About() {
               <li>Shape a job brief: responsibilities, must-have skills, location, pay and start date.</li>
               <li>Write a clear, inclusive advert from that brief.</li>
               <li>Decide on the candidate profile, sourcing approach and screening questions.</li>
-              <li>Get ready for job posting and the hiring pipeline as they launch.</li>
+              <li>Post the job on Workerra and read the applications as they come in.</li>
             </ul>
             <Link href={JOB_BRIEF_HREF} className={`mt-5 inline-block ${LINK}`}>
               Start a job brief <span aria-hidden>→</span>

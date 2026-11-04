@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChatEntry, chatHref } from "@/modules/chatbot";
-import { JobCard, SECTOR_LABELS, SampleNotice, type Job, type JobSector } from "@/modules/jobs";
+import { JobCard, SECTOR_LABELS, type Job, type JobSector } from "@/modules/jobs";
 import { Container, Faq, Photo, type FaqItem, type PhotoId } from "@/shared/ui";
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, LINK } from "./styles";
 
@@ -89,7 +89,7 @@ const STEPS: readonly { audience: string; id: string; photo: PhotoId; steps: rea
       },
       {
         title: "Turn it into an advert",
-        body: "Get a clear, inclusive job advert and screening questions, ready for when job posting opens on Workerra.",
+        body: "Get a clear, inclusive job advert and screening questions, then post it on Workerra.",
       },
     ],
   },
@@ -262,11 +262,6 @@ export function FeaturedJobs({ jobs, failed = false }: { jobs: readonly Job[] | 
 
         {jobs?.length ? (
           <>
-            {jobs.some((job) => job.sample) && (
-              <div className="mt-6">
-                <SampleNotice>These are sample listings for testing Workerra, not real vacancies.</SampleNotice>
-              </div>
-            )}
             <ul className="mt-6 grid gap-4 md:grid-cols-3">
               {jobs.map((job) => (
                 <li key={job.id}>
@@ -308,27 +303,26 @@ const homeFaq = (): readonly FaqItem[] => [
   },
   {
     question: "Do I need an account?",
-    answer: <p>No. You can search jobs and use the assistant without signing up. Candidate profiles and recruiter accounts are planned.</p>,
+    answer: (
+      <p>
+        No. You can search jobs, apply and use the assistant without signing up. Recruiters sign in to post jobs and read
+        applications. Candidate profiles are planned.
+      </p>
+    ),
   },
   {
     question: "Can I apply for jobs or post a vacancy today?",
     answer: (
       <p>
-        Not yet. Applications and job posting are being built. You can already get your CV and cover letter ready, or prepare
-        a job brief and advert, with the{" "}
+        Yes. Every job page has an application form, and recruiters can{" "}
+        <Link href="/recruiters" className={LINK}>
+          sign in to post a vacancy
+        </Link>{" "}
+        and read the applications it gets. The{" "}
         <Link href="/chat" className={LINK}>
           assistant
-        </Link>
-        .
-      </p>
-    ),
-  },
-  {
-    question: "Why do some jobs say “Sample”?",
-    answer: (
-      <p>
-        They are test listings we use while building Workerra. The employers are made up and you can&rsquo;t apply for them.
-        Real vacancies don&rsquo;t carry the Sample label.
+        </Link>{" "}
+        can help you get your CV and cover letter ready, or write the job brief and advert.
       </p>
     ),
   },

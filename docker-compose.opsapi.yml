@@ -5,8 +5,11 @@
 #   opsapi-migrate      OpsAPI's own migrations, every module (PROJECT_CODE=all, as INT)
 #   workerra-migrations Workerra's plugin migrations (Dockerfile.migrations)
 #   opsapi              an OpsAPI server with the plugin mounted, on http://localhost:4041,
-#                       so Workerra's /jobs can search it (profile: server)
-#   bootstrap           creates the workerra workspace and prints an API key (profile: server)
+#                       which Workerra's /jobs, /recruiters and job applications use (profile: server)
+#   bootstrap           creates the workerra workspace and its recruiter account, and
+#                       prints the server's API key (profile: server)
+#
+# ./start.sh runs all of this for you and writes the settings into .env.local.
 #   psql                ad-hoc queries: `run --rm psql -c "..."`
 name: workerra-opsapi
 
@@ -86,6 +89,11 @@ services:
       OPENSSL_SECRET_KEY: local-only-not-a-secret-0123456789
       # Reload the plugin's api/*.lua on save while developing it.
       OPSAPI_DEV_RELOAD: "true"
+      # No email server here, so sign-in codes can't be delivered: OpsAPI accepts
+      # this code instead (only when the deploy env isn't production). start.sh
+      # generates one into .env.local.
+      OPSAPI_DEPLOY_ENV: local
+      TEST_OTP_CODE: ${OPSAPI_TEST_OTP_CODE:-}
     ports:
       - "127.0.0.1:${OPSAPI_PORT:-4041}:80"
     volumes:
@@ -102,10 +110,18 @@ services:
       <<: *db-env
       PROJECT_CODE: all
       OPENSSL_SECRET_KEY: local-only-not-a-secret-0123456789
+      WORKERRA_RECRUITER_EMAIL: ${WORKERRA_RECRUITER_EMAIL:-}
+      WORKERRA_RECRUITER_PASSWORD: ${WORKERRA_RECRUITER_PASSWORD:-}
     working_dir: /app
     volumes:
       - ./migrations/opsapi:/app/projects/workerra:ro
-    command: ["lapis", "exec", "assert(loadfile('/app/projects/workerra/dev/bootstrap.lua'))()"]
+    # Long-bracket strings, so the values reach Lua untouched.
+    command:
+      - sh
+      - -euc
+      - >-
+        lapis exec "assert(loadfile('/app/projects/workerra/dev/bootstrap.lua'))({
+        email = [==[$$WORKERRA_RECRUITER_EMAIL]==], password = [==[$$WORKERRA_RECRUITER_PASSWORD]==] })"
 
   psql:
     image: pgvector/pgvector:pg14

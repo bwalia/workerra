@@ -12,9 +12,6 @@ extraEnv:
   # The int ring's NebulaDB (cluster-internal), as in docs/chatbot-reference.md.
   NEBULA_URL: "http://nebuladb.int.svc.cluster.local:8080"
   LOG_LEVEL: "debug"
-  # Built-in sample listings while int has no OpsAPI credentials, so the
-  # candidate and recruiter flows can be exercised. Ignored on prod by the app.
-  SAMPLE_JOBS: "true"
 
 # Any healthy LAN amd64 node, as workstation-opsapi does: net-region=home keeps
 # it on the LAN next to the ring's services (the cloud<->LAN mesh is

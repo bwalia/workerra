@@ -24,7 +24,16 @@ export interface ApiJob {
   /** YYYY-MM-DD */
   posted_at: string;
   closes_at: string | null;
-  sample: boolean;
+}
+
+/** What POST /jobs/{uuid}/applications takes. */
+export interface ApiApplicationInput {
+  name: string;
+  email: string;
+  phone?: string;
+  cover_letter?: string;
+  /** Up to 5 http(s) links: CV, LinkedIn, portfolio. */
+  links?: string[];
 }
 
 export interface ApiPageMeta {
@@ -47,7 +56,6 @@ export interface ApiJobSearchQuery {
   workplace?: string;
   /** Comma-separated EmploymentType values. */
   type?: string;
-  include_samples?: "true" | "false";
   page?: number;
   per_page?: number;
 }
@@ -59,6 +67,11 @@ type Get<Query, Path, Data> = {
   parameters: { query?: Query; header?: never; cookie?: never } & PathParams<Path>;
   requestBody?: never;
   responses: { 200: Json<Data>; 401: ApiError; 403: ApiError; 404: ApiError };
+};
+type Post<Body, Path, Data> = {
+  parameters: { query?: never; header?: never; cookie?: never } & PathParams<Path>;
+  requestBody: { content: { "application/json": Body } };
+  responses: { 201: Json<Data>; 401: ApiError; 403: ApiError; 404: ApiError; 409: ApiError; 422: ApiError };
 };
 type Route<Op, Path> = {
   parameters: { query?: never; header?: never; cookie?: never } & PathParams<Path>;
@@ -72,13 +85,17 @@ type Route<Op, Path> = {
   trace?: never;
 };
 
-type Samples = Pick<ApiJobSearchQuery, "include_samples">;
+type PostRoute<Op, Path> = Omit<Route<never, Path>, "get" | "post"> & { get?: never; post: Op };
 
 export interface WorkerraJobPaths {
   "/api/v2/workerra/jobs": Route<
     Get<ApiJobSearchQuery, never, { success: true; data: ApiJob[]; meta: ApiPageMeta }>,
     never
   >;
-  "/api/v2/workerra/jobs/sectors": Route<Get<Samples, never, { success: true; data: ApiSectorCount[] }>, never>;
-  "/api/v2/workerra/jobs/{uuid}": Route<Get<Samples, { uuid: string }, { success: true; data: ApiJob }>, { uuid: string }>;
+  "/api/v2/workerra/jobs/sectors": Route<Get<never, never, { success: true; data: ApiSectorCount[] }>, never>;
+  "/api/v2/workerra/jobs/{uuid}": Route<Get<never, { uuid: string }, { success: true; data: ApiJob }>, { uuid: string }>;
+  "/api/v2/workerra/jobs/{uuid}/applications": PostRoute<
+    Post<ApiApplicationInput, { uuid: string }, { success: true; data: { uuid: string; stage: string } }>,
+    { uuid: string }
+  >;
 }

@@ -1,7 +1,7 @@
 import { createClient, OpsApiError, type OpsApiClient } from "@opsapi/client";
-import type { ApiJob, WorkerraJobPaths } from "./opsapi-types";
-import { SAMPLE_JOBS } from "./sample-jobs";
-import { JOBS_PAGE_SIZE, SECTOR_LABELS, countBySector, searchJobs } from "./search";
+import { noStoreFetch } from "@/shared/api";
+import type { ApiApplicationInput, ApiJob, WorkerraJobPaths } from "./opsapi-types";
+import { JOBS_PAGE_SIZE, SECTOR_LABELS } from "./search";
 import type { Job, JobSearchFilters, JobSearchResult, JobSector } from "./types";
 
 // Where /jobs gets its listings. server.ts picks one per request from the
@@ -13,23 +13,20 @@ export interface JobSource {
   find(id: string): Promise<Job | null>;
   /** Open listings per sector, with every sector present. */
   sectorCounts(): Promise<Record<JobSector, number>>;
+  /** Send in an application for an open listing. */
+  apply(id: string, application: ApiApplicationInput): Promise<ApplyResult>;
 }
 
-/** The built-in test listings, searched in memory. */
-export function sampleJobSource(jobs: readonly Job[] = SAMPLE_JOBS): JobSource {
-  return {
-    search: async (filters, pageSize = JOBS_PAGE_SIZE) => searchJobs(jobs, filters, pageSize),
-    find: async (id) => jobs.find((job) => job.id === id && job.status === "open") ?? null,
-    sectorCounts: async () => countBySector(jobs),
-  };
-}
+export type ApplyResult =
+  | { status: "applied" }
+  | { status: "duplicate" }
+  | { status: "not_found" }
+  | { status: "invalid"; errors: Record<string, string> };
 
 export interface OpsApiJobSourceOptions {
   url: string;
   namespace: string;
   apiKey: string;
-  /** Ask for listings marked as samples too (never on prod). */
-  includeSamples: boolean;
   /** For tests. */
   fetch?: typeof globalThis.fetch;
 }
@@ -47,9 +44,8 @@ export function opsApiJobSource(options: OpsApiJobSourceOptions): JobSource {
     // A page render waits on this: fail fast and show the "unavailable" state.
     timeoutMs: 5000,
     retries: 1,
-    fetch: options.fetch,
+    fetch: options.fetch ?? noStoreFetch,
   });
-  const include_samples = options.includeSamples ? "true" : "false";
 
   const page = async (filters: JobSearchFilters, pageSize: number, page: number) => {
     const { data } = await client.GET("/api/v2/workerra/jobs", {
@@ -60,7 +56,6 @@ export function opsApiJobSource(options: OpsApiJobSourceOptions): JobSource {
           ...(filters.sector && { sector: filters.sector }),
           ...(filters.workplace.length > 0 && { workplace: filters.workplace.join(",") }),
           ...(filters.employmentType.length > 0 && { type: filters.employmentType.join(",") }),
-          include_samples,
           page,
           per_page: pageSize,
         },
@@ -81,12 +76,10 @@ export function opsApiJobSource(options: OpsApiJobSourceOptions): JobSource {
     },
 
     async find(id) {
-      // Ids are ATS job uuids; anything else (e.g. an old sample-… link) can't exist there.
+      // Ids are ATS job uuids; anything else can't exist there.
       if (!UUID.test(id)) return null;
       try {
-        const { data } = await client.GET("/api/v2/workerra/jobs/{uuid}", {
-          params: { path: { uuid: id }, query: { include_samples } },
-        });
+        const { data } = await client.GET("/api/v2/workerra/jobs/{uuid}", { params: { path: { uuid: id } } });
         return fromApiJob(data!.data);
       } catch (err) {
         if (err instanceof OpsApiError && err.isNotFound) return null;
@@ -95,12 +88,37 @@ export function opsApiJobSource(options: OpsApiJobSourceOptions): JobSource {
     },
 
     async sectorCounts() {
-      const { data } = await client.GET("/api/v2/workerra/jobs/sectors", { params: { query: { include_samples } } });
+      const { data } = await client.GET("/api/v2/workerra/jobs/sectors");
       const counts = Object.fromEntries(Object.keys(SECTOR_LABELS).map((s) => [s, 0])) as Record<JobSector, number>;
       for (const { sector, count } of data!.data) if (sector in counts) counts[sector] = count;
       return counts;
     },
+
+    async apply(id, application) {
+      if (!UUID.test(id)) return { status: "not_found" };
+      try {
+        await client.POST("/api/v2/workerra/jobs/{uuid}/applications", {
+          params: { path: { uuid: id } },
+          body: application,
+        });
+        return { status: "applied" };
+      } catch (err) {
+        if (err instanceof OpsApiError) {
+          if (err.isNotFound) return { status: "not_found" };
+          if (err.status === 409) return { status: "duplicate" };
+          if (err.status === 422) return { status: "invalid", errors: detailsOf(err) };
+        }
+        throw err;
+      }
+    },
   };
+}
+
+/** The plugin's per-field validation messages ({ details: { field: message } }). */
+export function detailsOf(err: OpsApiError): Record<string, string> {
+  const details = (err.body as { details?: unknown } | undefined)?.details;
+  if (!details || typeof details !== "object") return {};
+  return Object.fromEntries(Object.entries(details).filter((e): e is [string, string] => typeof e[1] === "string"));
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -131,6 +149,5 @@ export function fromApiJob(api: ApiJob): Job | null {
     postedAt: api.posted_at,
     closesAt: api.closes_at,
     status: "open",
-    ...(api.sample && { sample: true as const }),
   };
 }
