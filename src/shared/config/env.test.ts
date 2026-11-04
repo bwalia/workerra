@@ -12,14 +12,12 @@ describe("loadServerEnv", () => {
     expect(env.opsapi).toBeNull();
     expect(env.jobshoutApiUrl).toBeNull();
     expect(env.contactEmail).toBeNull();
-    expect(env.sampleJobs).toBe(true);
+    expect(env.sessionSecret).toBeNull();
   });
 
-  it("serves sample jobs locally by default, elsewhere only when asked, and never in prod", () => {
-    expect(loadServerEnv({ SAMPLE_JOBS: "false" }).sampleJobs).toBe(false);
-    expect(loadServerEnv({ APP_ENV: "int" }).sampleJobs).toBe(false);
-    expect(loadServerEnv({ APP_ENV: "test", SAMPLE_JOBS: "true" }).sampleJobs).toBe(true);
-    expect(loadServerEnv({ APP_ENV: "prod", SAMPLE_JOBS: "true" }).sampleJobs).toBe(false);
+  it("refuses a short session secret", () => {
+    expect(() => loadServerEnv({ SESSION_SECRET: "too-short" })).toThrow(/SESSION_SECRET/);
+    expect(loadServerEnv({ SESSION_SECRET: "x".repeat(32) }).sessionSecret).toBe("x".repeat(32));
   });
 
   it("accepts a single contact email and rejects anything that could inject into mailto:", () => {
@@ -29,7 +27,7 @@ describe("loadServerEnv", () => {
     expect(() => loadServerEnv({ CONTACT_EMAIL: "not-an-email" })).toThrow(/CONTACT_EMAIL/);
   });
 
-  it("only enables the CRM when fully configured", () => {
+  it("only enables OpsAPI when fully configured", () => {
     expect(loadServerEnv({ OPSAPI_URL: "https://ops", OPSAPI_NAMESPACE: "workerra" }).opsapi).toBeNull();
     expect(
       loadServerEnv({ OPSAPI_URL: "https://ops/", OPSAPI_NAMESPACE: "workerra", OPSAPI_API_KEY: "k" }).opsapi,

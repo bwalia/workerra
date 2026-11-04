@@ -12,14 +12,17 @@ export interface ServerEnv {
   logLevel: LogLevel;
   /** NebulaDB: LLM chat, embeddings and hybrid search used by the JobShout recruiting bot. */
   nebula: { url: string; apiKey: string | null } | null;
-  /** OpsAPI: job listings (Workerra's plugin over the ATS) and, later, CRM leads. */
+  /**
+   * OpsAPI: job listings and applications (Workerra's plugin over the ATS), and
+   * recruiter sign-in. The API key is the server's own; recruiters act as themselves.
+   */
   opsapi: { url: string; namespace: string; apiKey: string } | null;
+  /** Encrypts the recruiter session cookie. Unset → recruiter sign-in is off. */
+  sessionSecret: string | null;
   /** JobShout agent platform (Career Agent). Phase 4; needs a service identity. */
   jobshoutApiUrl: string | null;
   /** Where the assistant tells people to email the recruitment team. Unset → no contact channel offered. */
   contactEmail: string | null;
-  /** Show sample job listings (built-in, or marked as samples in OpsAPI). Always off in prod. */
-  sampleJobs: boolean;
 }
 
 type Source = Record<string, string | undefined>;
@@ -45,16 +48,22 @@ export function loadServerEnv(source: Source = process.env): ServerEnv {
     nebula: source.NEBULA_URL
       ? { url: stripTrailingSlash(source.NEBULA_URL), apiKey: source.NEBULA_API_KEY || null }
       : null,
-    // CRM is all-or-nothing: a partial config would fail on the first lead.
+    // All-or-nothing: a partial config would fail on the first request.
     opsapi:
       source.OPSAPI_URL && source.OPSAPI_NAMESPACE && source.OPSAPI_API_KEY
         ? { url: stripTrailingSlash(source.OPSAPI_URL), namespace: source.OPSAPI_NAMESPACE, apiKey: source.OPSAPI_API_KEY }
         : null,
     jobshoutApiUrl: source.JOBSHOUT_API_URL ? stripTrailingSlash(source.JOBSHOUT_API_URL) : null,
     contactEmail: parseContactEmail(source.CONTACT_EMAIL),
-    // Test data only: on by default locally, opt-in on int/test/acc, never on prod.
-    sampleJobs: appEnv !== "prod" && (source.SAMPLE_JOBS ? source.SAMPLE_JOBS === "true" : appEnv === "local"),
+    sessionSecret: parseSessionSecret(source.SESSION_SECRET),
   };
+}
+
+function parseSessionSecret(value: string | undefined): string | null {
+  if (!value) return null;
+  // It keys AES-256-GCM through SHA-256; anything short is guessable.
+  if (value.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters (e.g. openssl rand -base64 32)");
+  return value;
 }
 
 function parseContactEmail(value: string | undefined): string | null {

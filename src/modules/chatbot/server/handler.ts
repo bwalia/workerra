@@ -5,7 +5,7 @@ import type { AssistantMode, ChatReply } from "../types";
 import { journeyExtras, replyTo } from "./assistant";
 import { guideReply } from "./guide";
 import { AssistantError, type AssistantErrorKind } from "./nebula";
-import { clientKey, createRateLimiter } from "./rate-limit";
+import { clientKey, createRateLimiter } from "@/shared/security/rate-limit";
 import { MAX_BODY_CHARS, parseChatRequest } from "./validation";
 
 // POST /api/chat. Answers from the LLM when NebulaDB is configured, otherwise
@@ -30,7 +30,9 @@ export function assistantMode(): AssistantMode {
 }
 
 export async function handleChatPost(req: Request): Promise<Response> {
-  const { nebula, contactEmail } = loadServerEnv();
+  const env = loadServerEnv();
+  const { nebula, contactEmail } = env;
+  const jobsLive = env.opsapi !== null;
 
   const limit = limiter.check(clientKey(req.headers));
   if (!limit.allowed) {
@@ -46,12 +48,12 @@ export async function handleChatPost(req: Request): Promise<Response> {
 
   const { message, history } = parsed.value;
   const sizes = { messageChars: message.length, historyTurns: history.length };
-  const guided = () => ok<ChatReply>(guideReply(message, history, { contactEmail }), NO_STORE);
+  const guided = () => ok<ChatReply>(guideReply(message, history, { contactEmail, jobsLive }), NO_STORE);
   if (!nebula) return guided();
 
   const started = Date.now();
   try {
-    const result = await replyTo(nebula, { message, history, contactEmail });
+    const result = await replyTo(nebula, { message, history, contactEmail, jobsLive });
     log.info("assistant replied", { ...sizes, ms: Date.now() - started, model: result.model, provider: result.provider });
     return ok<ChatReply>(
       { reply: result.answer, mode: "ai", ...journeyExtras(message, history, { contactEmail }) },

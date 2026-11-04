@@ -74,7 +74,7 @@ src/
 
 | Concern | Now | Planned |
 |---------|-----|---------|
-| Authentication | `Session`/`Role` types, `getSession()` → null, `hasRole()` | OpsAPI auth (`/auth/*`, `/api/v2/register`) via `@opsapi/client`, token in an httpOnly cookie; middleware guarding recruiter/candidate routes |
+| Authentication | Recruiters sign in with their OpsAPI account (password + emailed code, `/auth/*` via `@opsapi/client`); tokens kept in an AES-GCM sealed httpOnly cookie (`src/shared/auth`, `SESSION_SECRET`), renewed through `/recruiters/session`; only members of the `OPSAPI_NAMESPACE` workspace get in | Candidate accounts (`/api/v2/register`) |
 | API layer | Response envelope, health, 501 chat stub | Per-module route handlers, input validation, rate limiting |
 | Database | Domain types per module (`types.ts`) | OpsAPI Postgres as system of record (ATS, CMS, CRM) + Workerra project plugin (below); NebulaDB for search/matching/chat only |
 | Logging | JSON logs, level per ring, redaction | Request IDs; Langfuse for AI calls |
@@ -103,8 +103,17 @@ taken from `bwalia/diy-tax-return-uk` `migrations/opsapi/`:
 - **Job listings (live):** `/jobs`, job pages and the home page's latest jobs
   search ATS jobs published through the plugin (`workerra_job_listings`,
   `GET /api/v2/workerra/jobs`), when `OPSAPI_*` is set. Filtering and paging run in
-  OpsAPI's Postgres. Without OpsAPI the jobs module falls back to its built-in
-  samples (non-prod) or says listings aren't live. See `migrations/opsapi/README.md`.
+  OpsAPI's Postgres. Without OpsAPI the pages say listings aren't live. There is
+  no sample or seed data: every listing is a real vacancy a recruiter posted.
+- **Applying (live):** the form on each job page calls a server action that posts
+  to `POST /api/v2/workerra/jobs/:uuid/applications` with the server's key; the
+  plugin adds an ATS candidate (matched by email) and application, with the cover
+  letter as a note. No candidate account needed.
+- **Recruiters (live):** `/recruiters` signs in as the recruiter's own OpsAPI user
+  and acts with their token: `POST /api/v2/ats/jobs` + `PUT …/workerra/jobs/:uuid/listing`
+  to post, `PUT /api/v2/ats/jobs/:uuid` to pause/close/reopen, and the plugin's
+  `GET /listings`, `/listings/:uuid`, `/listings/:uuid/applications` to review.
+  Their workspace role decides what they may do. See `migrations/opsapi/README.md`.
 - **Known SDK gap:** `@opsapi/client` 1.3.0 has no ATS paths (generated against a
   server without the `ats` feature). Regenerate the SDK with `ats` enabled.
 

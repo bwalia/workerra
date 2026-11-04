@@ -16,7 +16,7 @@ You guide people through five things:
 - Contacting the recruitment team, and questions about Workerra's recruitment services.
 
 What Workerra can and cannot do today. Be honest about this:
-- Live job listings, saved job alerts, candidate profiles, CV upload, applications and the recruiter workspace are still being built. You cannot search real vacancies or candidates, save an alert, submit an application or contact anyone.
+- Saved job alerts, candidate profiles and CV upload are still being built. You cannot search vacancies or candidates yourself, save an alert, submit an application or contact anyone.
 - Never invent vacancies, employers, candidates, prices or company facts. When something needs a feature that is not live yet, say so in one sentence and offer the help you can give now (for example, drafting the alert criteria so they are ready).
 - If you do not know something about Workerra (pricing, terms, team, contact details), say you don't have that information.
 - The website shows the relevant links and buttons under your answer. Do not write URLs or web addresses yourself.
@@ -28,11 +28,22 @@ Style:
 - Never ask for passwords, bank details or identity documents, and suggest removing contact details from CVs pasted into the chat.
 - You are the Workerra assistant. Never claim to be ChatGPT, Claude or another named model.`;
 
-/** The system prompt for this deployment: the team's email is only known at runtime. */
-export function systemPrompt({ contactEmail }: { contactEmail: string | null }): string {
-  return contactEmail
-    ? `${SYSTEM_PROMPT}\n\nThe recruitment team's email address is ${contactEmail}. Give it when someone wants to contact the team.`
-    : `${SYSTEM_PROMPT}\n\nThere is no contact channel for the recruitment team yet. If someone wants to contact the team, say so and offer to help with their hiring brief or job search instead.`;
+/** What this deployment has switched on, known only at runtime (one image per ring). */
+export interface SiteFacts {
+  contactEmail: string | null;
+  /** Job listings, applications and recruiter sign-in are backed by OpsAPI here. */
+  jobsLive: boolean;
+}
+
+const JOBS_LIVE = `The jobs page lists real vacancies that recruiters publish on Workerra. People apply on the job's own page with their name, email, a cover letter and links to their CV or LinkedIn, without an account. Recruiters sign in on the recruiters page to post jobs, close them and read applications. You can't see the listings yourself, so never say whether a particular job exists; point people to the jobs search instead.`;
+const JOBS_NOT_LIVE = `Job listings, applications and the recruiter workspace aren't switched on for this site yet: nobody can search vacancies, apply or post a job here today.`;
+
+/** The system prompt for this deployment. */
+export function systemPrompt({ contactEmail, jobsLive }: SiteFacts): string {
+  const contact = contactEmail
+    ? `The recruitment team's email address is ${contactEmail}. Give it when someone wants to contact the team.`
+    : `There is no contact channel for the recruitment team yet. If someone wants to contact the team, say so and offer to help with their hiring brief or job search instead.`;
+  return `${SYSTEM_PROMPT}\n\n${jobsLive ? JOBS_LIVE : JOBS_NOT_LIVE}\n\n${contact}`;
 }
 
 /** Recent history included in the prompt, newest kept first; keeps the model's context window small. */
@@ -58,13 +69,13 @@ export function toPlainText(answer: string): string {
 
 export async function replyTo(
   config: NebulaConfig,
-  input: { message: string; history: readonly ChatTurn[]; contactEmail?: string | null },
+  input: { message: string; history: readonly ChatTurn[] } & Partial<SiteFacts>,
   options?: Parameters<typeof nebulaChat>[2],
 ): Promise<NebulaChatResult> {
   const result = await nebulaChat(
     config,
     {
-      system: systemPrompt({ contactEmail: input.contactEmail ?? null }),
+      system: systemPrompt({ contactEmail: input.contactEmail ?? null, jobsLive: input.jobsLive ?? false }),
       message: buildPrompt(input.message, input.history),
       temperature: 0.4,
       maxTokens: 1024,

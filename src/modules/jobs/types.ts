@@ -39,8 +39,6 @@ export interface Job {
   postedAt: string;
   closesAt: string | null;
   status: "draft" | "open" | "closed";
-  /** Built-in test listing, not a real vacancy. */
-  sample?: true;
 }
 
 export interface JobSearchFilters {

@@ -1,24 +1,20 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { chatHref } from "@/modules/chatbot";
-import { Container } from "@/shared/ui";
+import { BUTTON_PRIMARY, Container, LINK } from "@/shared/ui";
+import { applyForJob } from "../apply";
 import { EMPLOYMENT_LABELS, SECTOR_LABELS, WORKPLACE_LABELS, formatSalary } from "../search";
 import type { Job } from "../types";
-import { SampleNotice } from "./JobCard";
+import { ApplyForm } from "./ApplyForm";
 
 export function JobDetail({ job }: { job: Job }) {
   const salary = formatSalary(job.salary);
-  const role = `the ${job.title} role at ${job.company.replace(/ \(Sample\)$/, "")}`;
+  const role = `the ${job.title} role at ${job.company}`;
   return (
     <Container className="py-12">
       <Link href="/jobs" className="text-sm text-muted hover:text-ink">
         ← All jobs
       </Link>
-      {job.sample && (
-        <div className="mt-6">
-          <SampleNotice>This is a sample listing for testing Workerra. The employer is made up and it is not a real vacancy.</SampleNotice>
-        </div>
-      )}
       <h1 className="mt-6 text-3xl font-semibold text-ink">{job.title}</h1>
       <p className="mt-2 text-muted">
         {job.company} · {job.location}
@@ -56,19 +52,17 @@ export function JobDetail({ job }: { job: Job }) {
             </ul>
           </Section>
 
-          <Section title="How to apply">
-            <p className="text-body">
-              {job.sample
-                ? "This is a sample listing, so there’s nothing to apply for. On a real vacancy, applying through Workerra isn’t available yet."
-                : "Applying through Workerra isn’t available yet."}{" "}
-              Whenever you do apply for a role like this, it helps to:
-            </p>
+          <Section title="Apply for this job" id="apply">
+            <p className="text-body">Before you send your application, it helps to:</p>
             <ul className="mt-3 list-disc space-y-1 pl-5 text-body">
               <li>Go through the requirements one by one and show where your CV meets each of them.</li>
               <li>Give a short example for the skills that matter most, with a result where you can.</li>
               <li>Keep your cover letter to a page and say why this employer and this role.</li>
               <li>Check the closing date and have your right-to-work documents ready.</li>
             </ul>
+            <div className="mt-6 rounded-lg border border-line bg-surface p-5">
+              <ApplyForm action={applyForJob.bind(null, job.id)} jobTitle={job.title} />
+            </div>
           </Section>
         </div>
 
@@ -84,6 +78,9 @@ export function JobDetail({ job }: { job: Job }) {
               <Fact term="Posted" value={formatDate(job.postedAt)} />
               <Fact term="Closes" value={job.closesAt ? formatDate(job.closesAt) : "Open until filled"} />
             </dl>
+            <a href="#apply" className={`mt-5 inline-block ${BUTTON_PRIMARY}`}>
+              Apply now
+            </a>
           </div>
 
           <div className="rounded-lg border border-line bg-surface p-5">
@@ -117,11 +114,9 @@ export function JobDetail({ job }: { job: Job }) {
   );
 }
 
-const LINK = "font-medium text-accent hover:underline";
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
   return (
-    <section className="mt-8 first:mt-0">
+    <section id={id} className="mt-8 scroll-mt-24 first:mt-0">
       <h2 className="text-lg font-semibold text-ink">{title}</h2>
       <div className="mt-2">{children}</div>
     </section>

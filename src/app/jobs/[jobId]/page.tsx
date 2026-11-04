@@ -11,8 +11,7 @@ type Props = { params: { jobId: string } };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const job = await findJob(params.jobId).catch(() => null);
   if (!job) return {};
-  // Sample listings are test data: keep them out of search engines on every ring.
-  return { title: `${job.title} · ${job.company}`, robots: job.sample ? { index: false } : undefined };
+  return { title: `${job.title} · ${job.company}`, description: job.description.slice(0, 160) };
 }
 
 export default async function JobDetailPage({ params }: Props) {

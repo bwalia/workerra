@@ -10,7 +10,7 @@ describe("guideReply", () => {
     expect(r.suggestions).toHaveLength(5);
   });
 
-  it.each(["find_jobs", "hire", "candidate_profile", "apply"] as const)("is honest that %s is not live yet", (journey) => {
+  it.each(["find_jobs", "hire", "candidate_profile", "apply"] as const)("is honest that %s is not live without job listings", (journey) => {
     const starters = {
       find_jobs: "I'm looking for a job.",
       hire: "I want to hire someone.",
@@ -19,9 +19,16 @@ describe("guideReply", () => {
     };
     const r = guideReply(starters[journey], [], NO_EMAIL);
     expect(r.journey).toBe(journey);
-    expect(r.reply).toMatch(/aren't live yet|still being (built|added)/);
+    expect(r.reply).toMatch(/aren't live yet|isn't switched on|aren't switched on|still being (built|added)/);
     expect(r.actions.length).toBeGreaterThan(0);
     expect(r.suggestions.length).toBeGreaterThan(0);
+  });
+
+  it("explains applying and posting where job listings are live", () => {
+    const live = { contactEmail: null, jobsLive: true };
+    expect(guideReply("How do I apply for a job?", [], live).reply).toContain("Apply for this job");
+    expect(guideReply("I want to hire someone.", [], live).reply).toContain("sign in on the recruiters page");
+    expect(guideReply("I'm looking for a job.", [], live).reply).not.toContain("switched on");
   });
 
   it("does not invent a contact channel when none is configured", () => {
