@@ -27,3 +27,30 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      # Every ring's values, with the OpsAPI backend as configured and forced on,
+      # so the off-by-default templates can't rot unseen.
+      - name: Lint and render
+        run: |
+          set -euo pipefail
+          CHART=deploy/helm/workerra
+          for values in "$CHART"/values-*.yaml; do
+            for force in no yes; do
+              args=(-f "$values" --set image.tag=ci)
+              [ "$force" = yes ] && args+=(--set opsapi.enabled=true)
+              echo "== $values (opsapi forced on: $force)"
+              helm lint "$CHART" "${args[@]}"
+              helm template workerra "$CHART" -n int "${args[@]}" > /dev/null
+            done
+          done
+      - name: Dockerfile.opsapi copies the plugin
+        run: |
+          set -euo pipefail
+          test -f migrations/opsapi/project.lua
+          ls migrations/opsapi/migrations/*.lua migrations/opsapi/api/*.lua > /dev/null

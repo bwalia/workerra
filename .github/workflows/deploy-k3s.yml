@@ -66,6 +66,13 @@ concurrency:
 
 env:
   IMAGE: harneetk78/workerra
+  # Workerra's OpsAPI backend (Dockerfile.opsapi), built with the web image and
+  # deployed only in rings whose values set opsapi.enabled (all off for now).
+  # Same Docker Hub account as IMAGE: DOCKER_USERNAME/DOCKER_PASSWD push to it.
+  OPSAPI_IMAGE: harneetk78/workerra-opsapi
+  # bwalia/opsapi release the backend is built on: must ship the ATS feature.
+  # 1.0.292 is what the int/test/acc Workstation OpsAPI runs today.
+  OPSAPI_BASE_TAG: "1.0.292"
   CHART: deploy/helm/workerra
   RELEASE: workerra
   DNS_ZONE: workerra.uk
@@ -204,11 +211,12 @@ jobs:
           [ -n "$sid" ] || { echo "::error::vhost create failed: $resp"; exit 1; }
           echo "registered $HOST (id=$sid)"
 
-  # ─── 4. Build & push the image ─────────────────────────────────────────────
-  # One image for every ring, tagged with the short commit SHA. ubuntu-latest is
-  # amd64 like the k3s1 LAN nodes, so the build is native.
+  # ─── 4. Build & push the images ────────────────────────────────────────────
+  # One web image and one OpsAPI backend image for every ring, both tagged with
+  # the short commit SHA. ubuntu-latest is amd64 like the k3s1 LAN nodes, so the
+  # builds are native.
   build:
-    name: Build & push image
+    name: Build & push images
     needs: [check, dns, edge]
     if: >-
       always()
@@ -241,6 +249,19 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
             ${{ env.IMAGE }}:latest
+      - name: OpsAPI backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.opsapi
+          build-args: OPSAPI_TAG=${{ env.OPSAPI_BASE_TAG }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.OPSAPI_IMAGE }}:${{ steps.tag.outputs.tag }}
+            ${{ env.OPSAPI_IMAGE }}:latest
 
   # ─── 5. Hand the new version to Ring Promoter ──────────────────────────────
   # Ring Promoter dispatches the deploy below for int, then checks /api/health
@@ -312,6 +333,17 @@ jobs:
           code=$(curl -sS -o /dev/null -w '%{http_code}' "https://hub.docker.com/v2/repositories/${IMAGE}/tags/${TAG}") || code=000
           [ "$code" = 200 ] || { echo "::error::${IMAGE}:${TAG} is not in Docker Hub (HTTP $code); refusing to deploy it"; exit 1; }
           echo "TAG=$TAG" >> "$GITHUB_ENV"
+      - name: Check the OpsAPI backend image (rings that enable it)
+        run: |
+          set -euo pipefail
+          # Rendered, not parsed from YAML: the chart decides whether the ring runs it.
+          if helm template "$RELEASE" "$CHART" -f "$VALUES" --set image.tag="$TAG" | grep -q "image: ${OPSAPI_IMAGE}:"; then
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "https://hub.docker.com/v2/repositories/${OPSAPI_IMAGE}/tags/${TAG}") || code=000
+            [ "$code" = 200 ] || { echo "::error::${OPSAPI_IMAGE}:${TAG} is not in Docker Hub (HTTP $code); refusing to deploy it"; exit 1; }
+            echo "OpsAPI backend enabled for $TARGET_ENV: ${OPSAPI_IMAGE}:${TAG}"
+          else
+            echo "OpsAPI backend not enabled for $TARGET_ENV"
+          fi
       - name: Kubeconfig
         env:
           KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
@@ -363,6 +395,12 @@ jobs:
           fi
           # maxUnavailable 0: if the new pods never turn Ready, the old ones keep serving.
           kubectl -n "$TARGET_ENV" rollout status deploy/"$RELEASE" --timeout=5m
+          # The OpsAPI backend, in rings that enable it (no helm --wait any more, so
+          # check it here). Its setup initContainer migrates on start: allow longer.
+          if kubectl -n "$TARGET_ENV" get deploy/workerra-opsapi >/dev/null 2>&1; then
+            kubectl -n "$TARGET_ENV" rollout status statefulset/workerra-opsapi-postgres --timeout=5m
+            kubectl -n "$TARGET_ENV" rollout status deploy/workerra-opsapi --timeout=8m
+          fi
           kubectl -n "$TARGET_ENV" get pods -l app.kubernetes.io/part-of=workerra -o wide
           running=$(kubectl -n "$TARGET_ENV" get deploy/"$RELEASE" -o jsonpath='{.spec.template.spec.containers[0].image}')
           [ "$running" = "$IMAGE:$TAG" ] || { echo "::error::Deployment runs $running, expected $IMAGE:$TAG"; exit 1; }
@@ -388,6 +426,7 @@ jobs:
           kubectl -n "$TARGET_ENV" describe deploy/"$RELEASE" | tail -30 || true
           kubectl -n "$TARGET_ENV" get events --sort-by=.lastTimestamp | grep -i workerra | tail -20 || true
           kubectl -n "$TARGET_ENV" logs deploy/"$RELEASE" --tail=60 || true
+          kubectl -n "$TARGET_ENV" logs deploy/workerra-opsapi --all-containers --tail=60 2>/dev/null || true
       - name: Probe through the edge (informational)
         env:
           HOST: ${{ needs.ring.outputs.host }}

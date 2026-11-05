@@ -1,6 +1,6 @@
 apiVersion: v2
 name: workerra
-description: Workerra web app (Next.js) for k3s1, one release per ring namespace
+description: Workerra web app (Next.js) and its optional OpsAPI backend for k3s1, one release per ring namespace
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "0.1.0"
