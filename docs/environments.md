@@ -1,8 +1,8 @@
 # Environments and deployment
 
 > **Status:** the INT pipeline runs (`.github/workflows/deploy-k3s.yml`,
-> `deploy/`) and its one-off setup below is done, except the WSL Vault path. TEST,
-> ACC and PROD have no values file or edge spec yet, so the workflow refuses them.
+> `deploy/`) and its one-off setup below is done. TEST, ACC and PROD have no
+> values file or edge spec yet, so the workflow refuses them.
 
 ## Rings
 
@@ -63,7 +63,7 @@ nothing outside the repo. `ci.yml` is not affected.
 
 ## One-off setup before the first INT deploy
 
-All done except step 4 (the WSL Vault path).
+All done for INT.
 
 1. **Self-hosted runner** on `bwalia/workerra` with label `workerra`, on the
    operator LAN (it must reach the wslproxy admin API and the k3s API). Runners on
@@ -81,13 +81,20 @@ All done except step 4 (the WSL Vault path).
 3. **Ring Promoter app** `workerra` in `bwalia/ring-promoter`
    `deploy/k8s/configmap.yaml` (github deployer → this workflow). `RP_GITHUB_TOKEN`
    must be allowed to dispatch workflows in `bwalia/workerra`.
-4. **WSL Vault** path `workerra/int/core`, written in the tenant whose token
-   `wslvault-backend` uses. Key names equal env var names: `CONTACT_EMAIL` (one
-   plain address: anything else fails `/api/health`). Int's NebulaDB needs no
-   `NEBULA_API_KEY`. Don't add `OPSAPI_API_KEY` until a Workerra OpsAPI with the
-   plugin exists (PR #10): with all three `OPSAPI_*` set, `/jobs` uses only OpsAPI.
-   Until the path exists the pod still starts (the Secret is optional) and the
-   deploy only warns. The ESO token's policy must allow reading `workerra/*`.
+4. **WSL Vault** path `workerra/<ring>/core`, written in the tenant whose token
+   `wslvault-backend` uses. Create or top it up with
+   `VAULT_TOKEN=... deploy/vault-seed.sh <ring>` (idempotent, prints key names only):
+   - `SESSION_SECRET`: generated once, never replaced on re-runs (recruiter sign-in).
+   - `CONTACT_EMAIL`: pass `CONTACT_EMAIL=...` to the script. One plain address:
+     anything else fails `/api/health`.
+   - Other keys are kept. Int's NebulaDB needs no `NEBULA_API_KEY`. Don't add
+     `OPSAPI_API_KEY` until a Workerra OpsAPI with the plugin exists (PR #10):
+     with all three `OPSAPI_*` set, `/jobs` uses only OpsAPI.
+
+   Key names equal env var names. Without the path the pod still starts (the
+   Secret is optional) and the deploy only warns. The ESO token's policy must
+   allow reading `workerra/*`. INT's path exists (`SESSION_SECRET`; no
+   `CONTACT_EMAIL` yet).
 
 ## VPN-only access for INT/TEST/ACC
 
