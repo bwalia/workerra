@@ -6,7 +6,7 @@ env: int
 host: int.workerra.uk
 
 # Secrets come from the Workerra-int-tenant WSL Vault tenant
-# (01a1ac98-f4aa-7a00-...), through Secret int/workerra-vault-token.
+# WSL Vault tenant, through Secret int/workerra-vault-token.
 ownVaultStore:
   enabled: true
   tokenSecret: workerra-vault-token
