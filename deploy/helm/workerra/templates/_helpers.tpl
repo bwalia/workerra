@@ -56,3 +56,18 @@ app.kubernetes.io/name: workerra-{{ .name }}
 - name: REDIS_ENABLED
   value: "false"
 {{- end -}}
+
+
+{{/*
+The secret store every Workerra ExternalSecret reads through: the chart's own
+SecretStore when ownVaultStore.enabled, else the shared ClusterSecretStore.
+*/}}
+{{- define "workerra.secretStoreRef" -}}
+{{- if .Values.ownVaultStore.enabled -}}
+kind: SecretStore
+name: workerra-vault
+{{- else -}}
+kind: ClusterSecretStore
+name: {{ .Values.vaultStore }}
+{{- end -}}
+{{- end -}}
