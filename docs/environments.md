@@ -193,6 +193,22 @@ minute and Stakater Reloader (`reloader.stakater.com/auto`) rolls the Deployment
 Reloader ignores a Secret's first creation, so after creating a new path either
 redeploy the ring from Ring Promoter or `kubectl -n <ring> rollout restart deploy/workerra`.
 
+**Workerra's own tenant.** With `ownVaultStore.enabled` (on in `values-int.yaml`)
+the chart creates a namespaced `SecretStore workerra-vault` and every Workerra
+ExternalSecret reads through it instead of `wslvault-backend`. INT reads the
+`Workerra-int-tenant` tenant. Before enabling it on a ring:
+
+1. In the tenant, write every key the ring needs (at least `SESSION_SECRET`,
+   `CONTACT_EMAIL` at `workerra/<ring>/core`, environment set to the ring).
+2. Create a token in that tenant whose policy is **read-only** on
+   `kv/data/workerra/*` (not `root`/`admin`).
+3. Store it in the ring namespace yourself, never in chat or a log:
+   `kubectl -n <ring> create secret generic workerra-vault-token --from-literal=token=...`
+   (`read -s` first to keep it out of shell history).
+
+If the store can't authenticate, the ExternalSecrets go unready but the existing
+`workerra-<name>` Secrets are kept (deletionPolicy Retain), so the pods keep running.
+
 PROD secrets go in a **separate prod-only WSL Vault tenant**: the project tenant
 kind accepts INT/TEST/ACC only (`wslvault/docs/operations/secret-tags-and-environments.md`).
 Promoting to PROD means copying each secret into that tenant, not reusing a

@@ -28,6 +28,15 @@ port: 3000
 # The Secrets are optional in the pod: until a Vault path exists the app still
 # starts, with the integrations it guards (e.g. the assistant) reported offline.
 vaultStore: wslvault-backend
+# Optional Workerra-only Vault tenant. When enabled, the chart creates a
+# namespaced SecretStore `workerra-vault` that authenticates with the token in
+# Secret <tokenSecret> (key `token`) in the ring namespace, and every Workerra
+# ExternalSecret reads through it instead of the shared vaultStore. Create that
+# Secret by hand before enabling (docs/environments.md, "Secrets"); the token
+# should be read-only on kv/data/workerra/* in the tenant.
+ownVaultStore:
+  enabled: false
+  tokenSecret: workerra-vault-token
 vaultSecrets:
   # NEBULA_API_KEY, OPSAPI_URL, OPSAPI_NAMESPACE, OPSAPI_API_KEY, SESSION_SECRET, ...
   core: workerra/int/core
