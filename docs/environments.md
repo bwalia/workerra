@@ -1,8 +1,8 @@
 # Environments and deployment
 
-> **Status:** the INT pipeline is written (`.github/workflows/deploy-k3s.yml`,
-> `deploy/`) but has **not run yet**. It needs the one-off setup below. TEST, ACC
-> and PROD have no values file or edge spec yet, so the workflow refuses them.
+> **Status:** the INT pipeline runs (`.github/workflows/deploy-k3s.yml`,
+> `deploy/`) and its one-off setup below is done. TEST, ACC and PROD have no
+> values file or edge spec yet, so the workflow refuses them.
 
 ## Rings
 
@@ -37,8 +37,8 @@ Ring Promoter ◀─────────────────────
 | DNS | GitHub-hosted | Cloudflare CNAME `<host>` → `lon1.pop0.uk`, **DNS-only** (wslproxy terminates TLS and needs the real client IP). Refuses to replace a non-CNAME record. |
 | Edge | self-hosted `workerra` | Registers `deploy/edge/wslproxy-server-<ring>.json` on the wslproxy admin API. Idempotent; fails if an existing vhost's `access_profile` differs from the spec. |
 | Build | GitHub-hosted | `Dockerfile` (Next.js standalone, non-root), `linux/amd64`, tag = short SHA (+ `latest`). |
-| Seed | GitHub-hosted | `POST rp.workstation.co.uk/api/apps/workerra/seed` for int, then waits until int reports the tag healthy. |
-| Deploy | self-hosted `workerra` | Checks the tag exists on Docker Hub, `helm upgrade --install --wait` with `values-<ring>.yaml`. |
+| Seed | GitHub-hosted | `POST rp.workstation.co.uk/api/apps/workerra/seed?async=1` for int and links the RP job. RP checks `/api/health` itself before recording the version. |
+| Deploy | self-hosted `workerra` | Checks the tag exists on Docker Hub, `helm upgrade --install` (Helm pinned, no `--wait`) with `values-<ring>.yaml`, warns about unsynced ExternalSecrets, then `rollout status`, the running image and in-cluster `/api/health` version. |
 
 The host for each ring is read from the `host:` line of
 `deploy/helm/workerra/values-<ring>.yaml`, so DNS, edge and Ingress cannot drift.
@@ -63,7 +63,7 @@ nothing outside the repo. `ci.yml` is not affected.
 
 ## One-off setup before the first INT deploy
 
-None of this is done yet.
+All done for INT.
 
 1. **Self-hosted runner** on `bwalia/workerra` with label `workerra`, on the
    operator LAN (it must reach the wslproxy admin API and the k3s API). Runners on
@@ -81,10 +81,20 @@ None of this is done yet.
 3. **Ring Promoter app** `workerra` in `bwalia/ring-promoter`
    `deploy/k8s/configmap.yaml` (github deployer → this workflow). `RP_GITHUB_TOKEN`
    must be allowed to dispatch workflows in `bwalia/workerra`.
-4. **WSL Vault** path `workerra/int/core` with the app's secrets (`NEBULA_API_KEY`,
-   later `OPSAPI_API_KEY`, ...). Key names equal env var names. Until it exists,
-   the pod still starts (the Secret is optional) and the assistant reports offline.
-   The ESO token's policy must allow reading `workerra/*`.
+4. **WSL Vault** path `workerra/<ring>/core`, written in the tenant whose token
+   `wslvault-backend` uses. Create or top it up with
+   `VAULT_TOKEN=... deploy/vault-seed.sh <ring>` (idempotent, prints key names only):
+   - `SESSION_SECRET`: generated once, never replaced on re-runs (recruiter sign-in).
+   - `CONTACT_EMAIL`: pass `CONTACT_EMAIL=...` to the script. One plain address:
+     anything else fails `/api/health`.
+   - Other keys are kept. Int's NebulaDB needs no `NEBULA_API_KEY`. Don't add
+     `OPSAPI_API_KEY` until a Workerra OpsAPI with the plugin exists (PR #10):
+     with all three `OPSAPI_*` set, `/jobs` uses only OpsAPI.
+
+   Key names equal env var names. Without the path the pod still starts (the
+   Secret is optional) and the deploy only warns. The ESO token's policy must
+   allow reading `workerra/*`. INT's path exists (`SESSION_SECRET`; no
+   `CONTACT_EMAIL` yet).
 
 ## VPN-only access for INT/TEST/ACC
 
@@ -115,6 +125,11 @@ mount `kv`) at `workerra/<ring>/<purpose>`, materialised by External Secrets
 (`ClusterSecretStore wslvault-backend`, `deploy/helm/workerra/templates/vault-secrets.yaml`).
 Never bake secrets into the image or Helm values. `.env.example` lists every
 variable the app reads.
+
+A Vault change reaches the pods without a deploy: ESO refreshes the Secret every
+minute and Stakater Reloader (`reloader.stakater.com/auto`) rolls the Deployment.
+Reloader ignores a Secret's first creation, so after creating a new path either
+redeploy the ring from Ring Promoter or `kubectl -n <ring> rollout restart deploy/workerra`.
 
 PROD secrets go in a **separate prod-only WSL Vault tenant**: the project tenant
 kind accepts INT/TEST/ACC only (`wslvault/docs/operations/secret-tags-and-environments.md`).
