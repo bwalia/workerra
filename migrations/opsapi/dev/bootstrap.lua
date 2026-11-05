@@ -2,22 +2,37 @@
 -- against its throwaway database. Never copied into an image (Dockerfile.opsapi
 -- ships project.lua, migrations/ and api/ only), never run against a shared OpsAPI.
 --
--- Creates the `workerra` workspace and prints an opsk_ API key scoped the way
--- Workerra's server needs: read and publish job listings, and create ATS jobs
--- for scripts/seed-opsapi-jobs.ts.
+-- Creates the `workerra` workspace with a recruiter account (its owner), and
+-- prints an opsk_ API key scoped the way Workerra's server needs: search job
+-- listings and send in applications. Recruiters post and manage jobs as
+-- themselves, signed in, so the key needs nothing else.
+--
+-- The recruiter's email and password are passed in by the compose service from
+-- WORKERRA_RECRUITER_EMAIL and WORKERRA_RECRUITER_PASSWORD (start.sh generates the
+-- password into .env.local): `lapis exec` runs in a temporary server that doesn't
+-- see the container's environment.
 local cjson = require("cjson")
 local db = require("lapis.db")
+
+local opts = ...
+local email = opts and opts.email
+local password = opts and opts.password
+assert(email and email:match("^[^@%s]+@[^@%s]+$"), "set WORKERRA_RECRUITER_EMAIL")
+assert(password and #password >= 12, "set WORKERRA_RECRUITER_PASSWORD (12+ characters)")
 
 require("scripts.setup-namespace").run({
     project_code = "all",
     namespace_name = "Workerra",
     namespace_slug = "workerra",
-    admin_email = "admin@workerra.local",
-    admin_password = "local-only-not-a-secret",
+    admin_email = email,
+    admin_password = password,
 })
 
 local ns = db.select("id FROM namespaces WHERE slug = ?", "workerra")[1]
 assert(ns, "the workerra namespace wasn't created")
+
+-- One server key at a time: revoke the ones earlier runs minted.
+pcall(db.query, "DELETE FROM api_keys WHERE namespace_id = ? AND name = ?", ns.id, "workerra-local")
 
 local ApiKey = require("helper.api-key")
 local raw, prefix, hash = ApiKey.generate()
@@ -26,15 +41,9 @@ require("queries.ApiKeyQueries").create({
     name = "workerra-local",
     key_prefix = prefix,
     key_hash = hash,
-    scopes = cjson.encode({
-        workerra_jobs = { "read", "update" },
-        -- Core routes check the URL's module (/api/v2/ats/...) and then the RBAC module.
-        ats = { "read", "create", "update" },
-        ats_jobs = { "read", "create", "update" },
-    }),
+    scopes = cjson.encode({ workerra_jobs = { "read", "create" } }),
 })
 
 print("")
-print("OPSAPI_URL=http://localhost:4041")
 print("OPSAPI_NAMESPACE=workerra")
 print("OPSAPI_API_KEY=" .. raw)

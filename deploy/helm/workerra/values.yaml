@@ -13,7 +13,7 @@ env: int
 host: int.workerra.uk
 
 image:
-  repository: bwalia/workerra
+  repository: harneetk78/workerra
   # Set by the deploy workflow: --set image.tag=<short sha>. Also exported as
   # APP_VERSION, which /api/health reports and Ring Promoter verifies.
   tag: latest
@@ -29,7 +29,7 @@ port: 3000
 # starts, with the integrations it guards (e.g. the assistant) reported offline.
 vaultStore: wslvault-backend
 vaultSecrets:
-  # NEBULA_API_KEY, OPSAPI_API_KEY, ...
+  # NEBULA_API_KEY, OPSAPI_URL, OPSAPI_NAMESPACE, OPSAPI_API_KEY, SESSION_SECRET, ...
   core: workerra/int/core
 
 # Workerra's own OpsAPI backend (templates/opsapi.yaml, opsapi-postgres.yaml):
@@ -40,7 +40,7 @@ opsapi:
   enabled: false
   image:
     # Dockerfile.opsapi, built and pushed with the web image (same tag).
-    repository: bwalia/workerra-opsapi
+    repository: harneetk78/workerra-opsapi
     tag: ""
   # Migrations and features this OpsAPI runs: core plus the ATS.
   projectCode: core_only,ats

@@ -14,7 +14,6 @@ export function JobCard({ job, headingLevel = 2 }: { job: Job; headingLevel?: 2 
             {job.title}
           </Link>
         </Heading>
-        {job.sample && <SampleBadge />}
       </div>
       <p className="mt-1 text-sm text-muted">
         {job.company} · {job.location}
@@ -26,25 +25,5 @@ export function JobCard({ job, headingLevel = 2 }: { job: Job; headingLevel?: 2 
         {salary && <span>{salary}</span>}
       </p>
     </article>
-  );
-}
-
-export function SampleBadge() {
-  return (
-    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
-      Sample
-    </span>
-  );
-}
-
-/** Says plainly that sample listings are test data, wherever they appear. */
-export function SampleNotice({ children }: { children: string }) {
-  return (
-    <p
-      role="note"
-      className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
-    >
-      {children}
-    </p>
   );
 }

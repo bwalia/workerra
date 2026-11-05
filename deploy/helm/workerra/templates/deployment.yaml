@@ -5,6 +5,12 @@ metadata:
   labels:
     {{- include "workerra.labels" . | nindent 4 }}
     {{- include "workerra.selector" . | nindent 4 }}
+  annotations:
+    # Stakater Reloader (runs on k3s1) rolls the pods when a Secret they load
+    # changes, so a Vault edit reaches the app within ESO's 1m refresh, as on
+    # workstation-opsapi. It reacts to updates, not to a Secret's first
+    # creation: the deploy job restarts the pods for that case.
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: {{ .Values.replicaCount }}
   strategy:

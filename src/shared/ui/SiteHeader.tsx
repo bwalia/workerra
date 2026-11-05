@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Container } from "./Container";
 import { Logo } from "./Logo";
+import { NavSearch, useNavSearchToggle } from "./NavSearch";
 import { MAIN_NAV, isActivePath } from "./site-nav";
 import { ThemeToggle } from "./ThemeControls";
 
@@ -13,15 +14,29 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
 export function SiteHeader() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const search = useNavSearchToggle();
+  const { setOpen: setSearchOpen } = search;
+
+  // One panel at a time: opening the menu closes the search row and vice versa.
+  useEffect(() => {
+    if (open) setSearchOpen(false);
+  }, [open, setSearchOpen]);
+  useEffect(() => {
+    if (search.open) setOpen(false);
+  }, [search.open]);
 
   // Close the mobile menu after navigating, and on Escape.
   useEffect(() => setOpen(false), [pathname]);
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    if (!open && !search.open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      setSearchOpen(false);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, search.open, setSearchOpen]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-line/80 bg-surface/80 backdrop-blur-md">
@@ -31,7 +46,7 @@ export function SiteHeader() {
         </Link>
 
         <nav aria-label="Main" className="hidden md:block">
-          <ul className="flex items-center gap-1">
+          <ul className="flex items-center lg:gap-1">
             {MAIN_NAV.map((n) => {
               const active = isActivePath(pathname, n.href);
               return (
@@ -39,7 +54,7 @@ export function SiteHeader() {
                   <Link
                     href={n.href}
                     aria-current={active ? "page" : undefined}
-                    className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${FOCUS} ${
+                    className={`rounded-full px-2 py-1.5 text-sm font-medium transition lg:px-3 ${FOCUS} ${
                       active ? "bg-accent-soft text-accent" : "text-muted hover:bg-subtle hover:text-ink"
                     }`}
                   >
@@ -52,10 +67,12 @@ export function SiteHeader() {
         </nav>
 
         <div className="flex items-center gap-1 sm:gap-2">
+          <NavSearch />
+          {search.button}
           <ThemeToggle />
           <Link
             href="/chat"
-            className={`hidden rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 sm:inline-flex ${FOCUS}`}
+            className={`hidden whitespace-nowrap rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 sm:inline-flex ${FOCUS}`}
           >
             Ask the assistant
           </Link>
@@ -73,6 +90,8 @@ export function SiteHeader() {
           </button>
         </div>
       </Container>
+
+      {search.panel}
 
       {open && (
         <nav id="mobile-nav" aria-label="Main" className="border-t border-line bg-surface md:hidden">

@@ -1,0 +1,78 @@
+# Workerra on Docker for local development. Use ./start.sh rather than calling
+# this directly: it works out the LAN address and picks the profile.
+#
+#   dev   next dev with hot reload; the repo is bind-mounted, node_modules and
+#         .next live in volumes so the host's macOS builds never mix with Linux ones.
+#   prod  the real Dockerfile image (the one promoted int → test → acc → prod),
+#         to check a change the way the cluster runs it.
+#
+# Both publish on every interface, so other machines on the LAN can open
+# http://<LAN_IP>:<WORKERRA_PORT>. Settings come from .env.local; the values
+# below override it. OpsAPI runs from docker-compose.opsapi.yml, which start.sh also starts.
+name: workerra
+
+x-app-env: &app-env
+  APP_ENV: local
+  # Links the site builds for itself (robots.txt, sitemap) point at the LAN address.
+  SITE_URL: ${SITE_URL:-http://localhost:3020}
+  # Inside the container "localhost" is the container; start.sh rewrites a
+  # localhost NEBULA_URL to host.docker.internal. Empty → guided mode.
+  NEBULA_URL: ${NEBULA_URL:-}
+  # OpsAPI (docker-compose.opsapi.yml), reached on the host. start.sh sets these;
+  # empty values mean no OpsAPI (jobs, applying and recruiter sign-in are off).
+  OPSAPI_URL: ${OPSAPI_URL:-}
+  OPSAPI_NAMESPACE: ${OPSAPI_NAMESPACE:-}
+  OPSAPI_API_KEY: ${OPSAPI_API_KEY:-}
+
+services:
+  dev:
+    profiles: [dev]
+    image: node:22-alpine
+    working_dir: /app
+    env_file: .env.local
+    environment:
+      <<: *app-env
+      PORT: "3020"
+      NEXT_TELEMETRY_DISABLED: "1"
+      # Bind-mount change events don't always reach the container on macOS.
+      WATCHPACK_POLLING: "true"
+    command:
+      - sh
+      - -euc
+      - |
+        apk add --no-cache libc6-compat >/dev/null
+        # Reinstall only when package-lock.json changes.
+        hash=$$(sha1sum package-lock.json | cut -d' ' -f1)
+        if [ "$$(cat node_modules/.lock-hash 2>/dev/null)" != "$$hash" ]; then
+          npm ci --no-audit --no-fund
+          echo "$$hash" > node_modules/.lock-hash
+        fi
+        exec npx next dev -H 0.0.0.0 -p 3020
+    ports:
+      - "0.0.0.0:${WORKERRA_PORT:-3020}:3020"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - next-cache:/app/.next
+
+  prod:
+    profiles: [prod]
+    build: .
+    image: workerra-web:local
+    env_file: .env.local
+    environment:
+      <<: *app-env
+      # .env.local's PORT is the host dev port; the image listens on 3000.
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      APP_VERSION: local
+    ports:
+      - "0.0.0.0:${WORKERRA_PORT:-3020}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  node_modules:
+  next-cache:

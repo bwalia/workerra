@@ -3,7 +3,7 @@ import { chatHref } from "@/modules/chatbot";
 import { Container } from "@/shared/ui";
 import { EMPLOYMENT_LABELS, SECTOR_LABELS, WORKPLACE_LABELS, hasFilters, jobSearchQuery } from "../search";
 import type { EmploymentType, JobSearchFilters, JobSearchResult, JobSector, WorkplaceType } from "../types";
-import { JobCard, SampleNotice } from "./JobCard";
+import { JobCard } from "./JobCard";
 import { JobCategories, JobSearchTips, JobsFaq } from "./JobsGuide";
 
 // /jobs listings with keyword, location, sector, workplace and contract-type filters.
@@ -19,7 +19,6 @@ export function JobSearch({
   result: JobSearchResult;
   sectorCounts: Record<JobSector, number>;
 }) {
-  const hasSample = result.jobs.some((job) => job.sample);
   const filtered = hasFilters(filters);
   return (
     <Container className="py-12">
@@ -60,14 +59,6 @@ export function JobSearch({
           )}
         </div>
       </form>
-
-      {hasSample && (
-        <div className="mt-6">
-          <SampleNotice>
-            These are sample listings for testing Workerra. The employers are made up and these are not real vacancies.
-          </SampleNotice>
-        </div>
-      )}
 
       <p className="mt-6 text-sm text-muted" aria-live="polite">
         {result.total === 1 ? "1 job" : `${result.total} jobs`}
@@ -134,7 +125,7 @@ export function JobsUnavailable({ reason, query }: { reason: "not_live" | "error
             </>
           ) : (
             <>
-              Workerra is still being built and job listings aren&rsquo;t live.
+              Job listings aren&rsquo;t switched on for this site yet.
               {query && <> Your search for &ldquo;{query}&rdquo; will work once they are.</>}
             </>
           )}{" "}

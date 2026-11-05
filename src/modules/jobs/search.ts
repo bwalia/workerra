@@ -1,4 +1,4 @@
-import type { EmploymentType, Job, JobSearchFilters, JobSearchResult, JobSector, SalaryRange, WorkplaceType } from "./types";
+import type { EmploymentType, JobSearchFilters, JobSector, SalaryRange, WorkplaceType } from "./types";
 
 export const JOBS_PAGE_SIZE = 10;
 
@@ -24,32 +24,6 @@ export const SECTOR_LABELS: Record<JobSector, string> = {
   hospitality_retail: "Hospitality and retail",
   admin: "Office and administration",
 };
-
-/**
- * Open jobs matching the /jobs filters, newest first. Every keyword must appear
- * in the title, company, skills or description; location is a substring match;
- * workplace and contract type match any of the chosen values; sector is exact.
- */
-export function searchJobs(jobs: readonly Job[], filters: JobSearchFilters, pageSize = JOBS_PAGE_SIZE): JobSearchResult {
-  const terms = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
-  const location = filters.location.toLowerCase();
-
-  const matches = jobs
-    .filter((job) => job.status === "open")
-    .filter((job) => {
-      const text = [job.title, job.company, job.description, ...job.skills].join(" ").toLowerCase();
-      return terms.every((term) => text.includes(term));
-    })
-    .filter((job) => !location || job.location.toLowerCase().includes(location))
-    .filter((job) => !filters.workplace.length || filters.workplace.includes(job.workplace))
-    .filter((job) => !filters.employmentType.length || filters.employmentType.includes(job.employmentType))
-    .filter((job) => !filters.sector || job.sector === filters.sector)
-    .sort((a, b) => b.postedAt.localeCompare(a.postedAt));
-
-  const pageCount = Math.max(1, Math.ceil(matches.length / pageSize));
-  const page = Math.min(filters.page, pageCount);
-  return { jobs: matches.slice((page - 1) * pageSize, page * pageSize), total: matches.length, page, pageCount };
-}
 
 /** "£60,000–£72,000 a year", "£13.50 an hour", or null when no pay is given. */
 export function formatSalary(salary: SalaryRange | null): string | null {
@@ -77,13 +51,6 @@ export function jobSearchQuery(filters: JobSearchFilters, page: number): string 
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `/jobs?${query}` : "/jobs";
-}
-
-/** Open jobs per sector, for the category links on /jobs. */
-export function countBySector(jobs: readonly Job[]): Record<JobSector, number> {
-  const counts = Object.fromEntries(Object.keys(SECTOR_LABELS).map((s) => [s, 0])) as Record<JobSector, number>;
-  for (const job of jobs) if (job.status === "open") counts[job.sector]++;
-  return counts;
 }
 
 /** Whether any filter beyond the page number is set. */

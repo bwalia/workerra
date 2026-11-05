@@ -44,11 +44,12 @@ const chatFaq = (): readonly FaqItem[] => [
     question: "Can it search real vacancies or apply for me?",
     answer: (
       <p>
-        Not yet. Live listings, applications and job alerts are still being built. The assistant links you to the{" "}
+        No. It can&rsquo;t see the listings or send anything on your behalf. It links you to the{" "}
         <Link href="/jobs" className={LINK}>
           jobs page
         </Link>{" "}
-        with your search filled in, and helps you get your CV and cover letter ready.
+        with your search filled in, where you open a job and apply yourself, and it helps you get your CV and cover letter
+        ready first.
       </p>
     ),
   },

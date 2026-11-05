@@ -1,8 +1,8 @@
 # Environments and deployment
 
-> **Status:** the INT pipeline is written (`.github/workflows/deploy-k3s.yml`,
-> `deploy/`) but has **not run yet**. It needs the one-off setup below. TEST, ACC
-> and PROD have no values file or edge spec yet, so the workflow refuses them.
+> **Status:** the INT pipeline runs (`.github/workflows/deploy-k3s.yml`,
+> `deploy/`) and its one-off setup below is done. TEST, ACC and PROD have no
+> values file or edge spec yet, so the workflow refuses them.
 
 ## Rings
 
@@ -25,9 +25,9 @@ test fails if any ring other than prod is marked public or indexable.
 Modelled on `bwalia/opsapi` and `bwalia/closeknitty` `deploy-k3s.yml`:
 
 ```
-push to main ─▶ check ─▶ DNS ─▶ edge vhost ─▶ build & push bwalia/workerra:<sha> ─▶ seed Ring Promoter (int)
-                                                                                         │
-Ring Promoter ◀──────────────────────────────────────────────────────────────────────────┘
+push to main ─▶ check ─▶ DNS ─▶ edge vhost ─▶ build & push harneetk78/workerra:<sha> ─▶ seed Ring Promoter (int)
+                                                                                            │
+Ring Promoter ◀─────────────────────────────────────────────────────────────────────────────┘
    └─ dispatches deploy-k3s.yml (TARGET_ENV=int, DEPLOYMENT_TYPE=deploy, IMAGE_TAG=<sha>)
         └─ DNS ─▶ edge vhost ─▶ helm upgrade workerra (namespace = ring) ─▶ RP checks /api/health data.version == <sha>
 ```
@@ -37,8 +37,8 @@ Ring Promoter ◀─────────────────────
 | DNS | GitHub-hosted | Cloudflare CNAME `<host>` → `lon1.pop0.uk`, **DNS-only** (wslproxy terminates TLS and needs the real client IP). Refuses to replace a non-CNAME record. |
 | Edge | self-hosted `workerra` | Registers `deploy/edge/wslproxy-server-<ring>.json` on the wslproxy admin API. Idempotent; fails if an existing vhost's `access_profile` differs from the spec. |
 | Build | GitHub-hosted | `Dockerfile` (Next.js standalone, non-root), `linux/amd64`, tag = short SHA (+ `latest`). |
-| Seed | GitHub-hosted | `POST rp.workstation.co.uk/api/apps/workerra/seed` for int, then waits until int reports the tag healthy. |
-| Deploy | self-hosted `workerra` | Checks the tag exists on Docker Hub, `helm upgrade --install --wait` with `values-<ring>.yaml`. |
+| Seed | GitHub-hosted | `POST rp.workstation.co.uk/api/apps/workerra/seed?async=1` for int and links the RP job. RP checks `/api/health` itself before recording the version. |
+| Deploy | self-hosted `workerra` | Checks the tag exists on Docker Hub, `helm upgrade --install` (Helm pinned, no `--wait`) with `values-<ring>.yaml`, warns about unsynced ExternalSecrets, then `rollout status`, the running image and in-cluster `/api/health` version. |
 
 The host for each ring is read from the `host:` line of
 `deploy/helm/workerra/values-<ring>.yaml`, so DNS, edge and Ingress cannot drift.
@@ -63,7 +63,7 @@ nothing outside the repo. `ci.yml` is not affected.
 
 ## One-off setup before the first INT deploy
 
-None of this is done yet.
+All done for INT.
 
 1. **Self-hosted runner** on `bwalia/workerra` with label `workerra`, on the
    operator LAN (it must reach the wslproxy admin API and the k3s API). Runners on
@@ -73,17 +73,28 @@ None of this is done yet.
    `first_time_contributors`): the repo is public and `ci.yml` runs on PRs.
 2. **Repository secrets** (CI credentials only):
    - `CLOUDFLARE_API_TOKEN`: Zone:Read + DNS:Edit on `workerra.uk`.
-   - `WSLPROXY_USER`, `WSLPROXY_PASSWORD`, `WSLPROXY_GATEWAY_URL`.
-   - `DOCKER_USERNAME`, `DOCKER_PASSWD`: push to `bwalia/workerra`.
+   - `WSLPROXY_USERNAME`, `WSLPROXY_PASSWORD`, `WSLPROXY_BASE_URL`.
+   - `DOCKER_USERNAME`, `DOCKER_PASSWD`: push to the Docker Hub repository `harneetk78/workerra`
+     (username `harneetk78` plus a Read & Write access token from that same account).
    - `RP_API_TOKEN`: workstation Ring Promoter API token.
    - `KUBE_CONFIG_DATA_K3S`: base64 kubeconfig for k3s1.
 3. **Ring Promoter app** `workerra` in `bwalia/ring-promoter`
    `deploy/k8s/configmap.yaml` (github deployer → this workflow). `RP_GITHUB_TOKEN`
    must be allowed to dispatch workflows in `bwalia/workerra`.
-4. **WSL Vault** path `workerra/int/core` with the app's secrets (`NEBULA_API_KEY`,
-   later `OPSAPI_API_KEY`, ...). Key names equal env var names. Until it exists,
-   the pod still starts (the Secret is optional) and the assistant reports offline.
-   The ESO token's policy must allow reading `workerra/*`.
+4. **WSL Vault** path `workerra/<ring>/core`, written in the tenant whose token
+   `wslvault-backend` uses. Create or top it up with
+   `VAULT_TOKEN=... deploy/vault-seed.sh <ring>` (idempotent, prints key names only):
+   - `SESSION_SECRET`: generated once, never replaced on re-runs (recruiter sign-in).
+   - `CONTACT_EMAIL`: pass `CONTACT_EMAIL=...` to the script. One plain address:
+     anything else fails `/api/health`.
+   - Other keys are kept. Int's NebulaDB needs no `NEBULA_API_KEY`. Don't add
+     `OPSAPI_API_KEY` until a Workerra OpsAPI with the plugin exists (PR #10):
+     with all three `OPSAPI_*` set, `/jobs` uses only OpsAPI.
+
+   Key names equal env var names. Without the path the pod still starts (the
+   Secret is optional) and the deploy only warns. The ESO token's policy must
+   allow reading `workerra/*`. INT's path exists (`SESSION_SECRET`; no
+   `CONTACT_EMAIL` yet).
 
 ## Workerra OpsAPI backend
 
@@ -96,7 +107,7 @@ used and must not be changed for Workerra.
 
 | Piece | What | Where |
 |---|---|---|
-| Image | `bwalia/opsapi:<OPSAPI_BASE_TAG>` + the plugin (`migrations/opsapi/`) | `Dockerfile.opsapi` → `bwalia/workerra-opsapi:<sha>`, built by `deploy-k3s.yml` with the web image |
+| Image | `bwalia/opsapi:<OPSAPI_BASE_TAG>` + the plugin (`migrations/opsapi/`) | `Dockerfile.opsapi` → `harneetk78/workerra-opsapi:<sha>`, built by `deploy-k3s.yml` with the web image |
 | OpsAPI | `workerra-opsapi` Deployment + ClusterIP Service, one replica | `templates/opsapi.yaml` |
 | Setup | initContainer on every start: `lapis migrate` (`PROJECT_CODE=core_only,ats`), the `workerra` workspace, the plugin's migrations. All idempotent | `templates/opsapi.yaml` |
 | Database | `workerra-opsapi-postgres` StatefulSet (pgvector, `local-path` 10Gi) | `templates/opsapi-postgres.yaml` |
@@ -106,7 +117,7 @@ used and must not be changed for Workerra.
 ### Turning it on for INT (each step needs Balinder's approval)
 
 1. **Pipeline prerequisites:** the one-off setup above is done and
-   `WORKERRA_DEPLOY_ENABLED=true`. The first build pushes `bwalia/workerra-opsapi`
+   `WORKERRA_DEPLOY_ENABLED=true`. The first build pushes `harneetk78/workerra-opsapi`
    (Docker Hub creates the public repo on first push; the image holds no secrets).
 2. **OpsAPI's own secrets** at WSL Vault `workerra/int/opsapi`: `POSTGRES_PASSWORD`,
    `JWT_SECRET_KEY`, `OPENSSL_SECRET_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, all
@@ -116,7 +127,8 @@ used and must not be changed for Workerra.
    Ring Promoter deploy. The `setup` initContainer migrates and creates the
    workspace. Postgres pins itself to the node it first lands on.
 4. **API key for the web app:** an `opsk_` key in the `workerra` workspace scoped
-   to `workerra_jobs: ["read"]` only. The backend has no SMTP, so mint it inside the
+   to `workerra_jobs: ["read", "create"]` only (search and apply, as
+   `migrations/opsapi/dev/bootstrap.lua` mints locally). The backend has no SMTP, so mint it inside the
    pod (the same calls as `migrations/opsapi/dev/bootstrap.lua`) rather than through
    a dashboard sign-in. It prints once; put it straight into Vault as
    `OPSAPI_API_KEY` at `workerra/int/core`, never into a terminal log or chat:
@@ -126,17 +138,18 @@ used and must not be changed for Workerra.
      local ns = require('lapis.db').select('id FROM namespaces WHERE slug = ?', 'workerra')[1]
      local raw, prefix, hash = require('helper.api-key').generate()
      require('queries.ApiKeyQueries').create({ namespace_id = ns.id, name = 'workerra-web',
-       key_prefix = prefix, key_hash = hash, scopes = require('cjson').encode({ workerra_jobs = { 'read' } }) })
+       key_prefix = prefix, key_hash = hash, scopes = require('cjson').encode({ workerra_jobs = { 'read', 'create' } }) })
      print(raw)"
    ```
 
    ESO syncs it within a minute; then restart the web pods
    (`kubectl -n int rollout restart deploy/workerra`). Until the key is there the
-   site keeps its non-OpsAPI behaviour. Revoke a key from the OpsAPI dashboard
+   jobs pages say listings aren't live yet. Revoke a key from the OpsAPI dashboard
    (port-forward `svc/workerra-opsapi`) or `ApiKeyQueries.revoke`.
-5. **Listings:** seed samples (`npm run seed:opsapi -- --allow-remote` through the
-   port-forward, with a separate key that can create ATS jobs; shown only where
-   `SAMPLE_JOBS=true`), or publish real ATS jobs with `PUT /api/v2/workerra/jobs/:uuid/listing`.
+5. **Listings:** there is no sample data. Create a recruiter account in the
+   `workerra` workspace (as `dev/bootstrap.lua` does locally); recruiters then sign
+   in at `/recruiters/sign-in` (needs `SESSION_SECRET` at `workerra/int/core`) and
+   post real listings.
 
 TEST, ACC and PROD repeat this with their own values file, Vault paths and keys.
 PROD's secrets go in the prod-only Vault tenant, and its key is minted there,
@@ -174,6 +187,11 @@ mount `kv`) at `workerra/<ring>/<purpose>`, materialised by External Secrets
 (`ClusterSecretStore wslvault-backend`, `deploy/helm/workerra/templates/vault-secrets.yaml`).
 Never bake secrets into the image or Helm values. `.env.example` lists every
 variable the app reads.
+
+A Vault change reaches the pods without a deploy: ESO refreshes the Secret every
+minute and Stakater Reloader (`reloader.stakater.com/auto`) rolls the Deployment.
+Reloader ignores a Secret's first creation, so after creating a new path either
+redeploy the ring from Ring Promoter or `kubectl -n <ring> rollout restart deploy/workerra`.
 
 PROD secrets go in a **separate prod-only WSL Vault tenant**: the project tenant
 kind accepts INT/TEST/ACC only (`wslvault/docs/operations/secret-tags-and-environments.md`).

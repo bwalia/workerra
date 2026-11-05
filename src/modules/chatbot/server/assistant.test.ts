@@ -53,7 +53,14 @@ describe("SYSTEM_PROMPT", () => {
 
 describe("systemPrompt", () => {
   it("gives the team inbox only when one is configured", () => {
-    expect(systemPrompt({ contactEmail: "team@workerra.uk" })).toContain("team@workerra.uk");
-    expect(systemPrompt({ contactEmail: null })).toContain("no contact channel");
+    expect(systemPrompt({ contactEmail: "team@workerra.uk", jobsLive: false })).toContain("team@workerra.uk");
+    expect(systemPrompt({ contactEmail: null, jobsLive: false })).toContain("no contact channel");
+  });
+
+  it("says applying and posting work only where job listings are switched on", () => {
+    expect(systemPrompt({ contactEmail: null, jobsLive: true })).toContain("People apply on the job's own page");
+    const off = systemPrompt({ contactEmail: null, jobsLive: false });
+    expect(off).toContain("aren't switched on for this site yet");
+    expect(off).not.toContain("People apply on the job's own page");
   });
 });

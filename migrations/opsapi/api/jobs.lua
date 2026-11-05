@@ -1,14 +1,20 @@
 -- Workerra job board API, mounted at /api/v2/workerra.
 --
---   GET /jobs               search open, published jobs: ?q=&location=&sector=
---                           &workplace=a,b&type=a,b&include_samples=true&page=&per_page=
---   GET /jobs/sectors       open, published jobs per sector (same include_samples)
---   GET /jobs/:uuid         one open, published job by its ATS job uuid
---   PUT /jobs/:uuid/listing publish an ATS job on Workerra, or update its listing
+--   GET  /jobs                    search open, published jobs: ?q=&location=&sector=
+--                                 &workplace=a,b&type=a,b&page=&per_page=
+--   GET  /jobs/sectors            open, published jobs per sector
+--   GET  /jobs/:uuid              one open, published job by its ATS job uuid
+--   POST /jobs/:uuid/applications apply for an open, published job
+--   PUT  /jobs/:uuid/listing      publish an ATS job on Workerra, or update its listing
+--   GET  /listings                the workspace's listings, whatever their ATS status
+--   GET  /listings/:uuid          one of them
+--   GET  /listings/:uuid/applications  who applied for one of them
 --
 -- A listed job is an ats_jobs row (title, location, employment type, description,
--- status) plus its workerra_job_listings row (everything else). Workerra's server
--- calls these with an opsk_ API key scoped to workerra_jobs.
+-- status) plus its workerra_job_listings row (everything else); an application is
+-- an ATS candidate and application, so recruiters see it in the ATS pipeline too.
+-- Workerra's server searches and applies with an opsk_ API key scoped to
+-- workerra_jobs (read, create); recruiters publish and manage as themselves.
 local sdk = require("helper.plugin-sdk")
 local cjson = require("cjson")
 local db = sdk.db
@@ -20,6 +26,7 @@ local SECTORS = {
     customer_service = true, construction = true, marketing = true, hospitality_retail = true, admin = true,
 }
 local MAX_TERMS = 8
+local ATS = require("queries.AtsQueries")
 
 -- ATS employment types are free text ("Full-time", "full_time"): compare them in one form.
 local EMPLOYMENT_SQL = "regexp_replace(lower(j.employment_type), '[^a-z]+', '_', 'g')"
@@ -70,7 +77,7 @@ local SELECT = [[
     SELECT j.uuid, j.title, j.location, j.description, j.status, ]] .. EMPLOYMENT_SQL .. [[ AS employment_type,
            l.company, l.workplace, l.sector, l.salary_min, l.salary_max, l.salary_currency, l.salary_period,
            l.responsibilities, l.requirements, l.benefits, l.skills, l.closes_at::text AS closes_at,
-           l.is_sample, l.published_at::text AS published_at
+           l.published_at::text AS published_at
     FROM workerra_job_listings l
     JOIN ats_jobs j ON j.id = l.ats_job_id AND j.namespace_id = l.namespace_id
 ]]
@@ -91,24 +98,23 @@ local function job_out(r)
         responsibilities = json_list(r.responsibilities), requirements = json_list(r.requirements),
         benefits = json_list(r.benefits), skills = json_list(r.skills),
         posted_at = date_only(r.published_at), closes_at = date_only(r.closes_at) or cjson.null,
-        sample = r.is_sample == true,
     }
 end
 
--- WHERE clause for jobs a visitor may see, plus the search filters in `p`.
-local function visible(ns, p)
-    local where = {
+-- WHERE clause for jobs a visitor may see and apply for: open in the ATS and not
+-- past its closing date.
+local function visible(ns)
+    return {
         "l.namespace_id = " .. db.escape_literal(ns),
         "j.deleted_at IS NULL",
         "j.status = 'open'",
+        "(l.closes_at IS NULL OR l.closes_at >= CURRENT_DATE)",
         EMPLOYMENT_SQL .. " IN ('full_time', 'part_time', 'contract', 'temporary', 'internship')",
     }
-    if p.include_samples ~= "true" then where[#where + 1] = "NOT l.is_sample" end
-    return where
 end
 
 local function search_where(ns, p)
-    local where = visible(ns, p)
+    local where = visible(ns)
     -- Every keyword must appear in the title, company, description or skills.
     local terms = 0
     for term in tostring(str(p.q, 200) or ""):lower():gmatch("%S+") do
@@ -157,8 +163,24 @@ local LISTING_FIELDS = {
     salary_currency = { type = "string", min = 3, max = 3 },
     salary_period = { type = "string", enum = { "hour", "day", "year" } },
     closes_at = { type = "date" },
-    sample = { type = "boolean" },
 }
+
+local APPLICATION_FIELDS = {
+    name = { type = "string", required = true, max = 200 },
+    email = { type = "string", required = true, max = 254 },
+    phone = { type = "string", max = 40 },
+    cover_letter = { type = "string", max = 8000 },
+}
+
+local function trimmed(v) return type(v) == "string" and v:gsub("^%s+", ""):gsub("%s+$", "") or v end
+
+local function valid_email(e)
+    return type(e) == "string" and e:match("^[^%s@,;<>]+@[^%s@,;<>]+%.[^%s@,;<>]+$") ~= nil
+end
+
+local function valid_url(u)
+    return type(u) == "string" and #u <= 500 and u:match("^https?://[^%s]+$") ~= nil
+end
 
 return function(app)
     local function schema(name, s) return sdk.schema(app, name, s) end
@@ -173,7 +195,7 @@ return function(app)
     local Job = schema("Job", {
         type = "object",
         required = { "uuid", "title", "company", "location", "workplace", "employment_type", "sector", "description",
-            "responsibilities", "requirements", "benefits", "skills", "posted_at", "sample" },
+            "responsibilities", "requirements", "benefits", "skills", "posted_at" },
         properties = {
             uuid = { type = "string", format = "uuid", description = "The ATS job's uuid" },
             title = S, company = S, location = S,
@@ -184,7 +206,24 @@ return function(app)
             responsibilities = STRINGS, requirements = STRINGS, benefits = STRINGS, skills = STRINGS,
             posted_at = { type = "string", format = "date" },
             closes_at = { type = "string", format = "date" },
-            sample = { type = "boolean", description = "Test data, not a real vacancy" },
+        },
+    })
+    local Listing = schema("Listing", {
+        type = "object", required = { "uuid", "title", "company", "status", "listed", "applications", "posted_at" },
+        properties = {
+            uuid = { type = "string", format = "uuid" }, title = S, company = S, location = S,
+            status = { type = "string", enum = { "draft", "open", "paused", "closed" }, description = "The ATS job's status" },
+            listed = { type = "boolean", description = "Visitors can see and apply for it now" },
+            applications = { type = "integer" },
+            posted_at = { type = "string", format = "date" }, closes_at = { type = "string", format = "date" },
+        },
+    })
+    local Application = schema("Application", {
+        type = "object", required = { "uuid", "stage", "name", "email", "applied_at" },
+        properties = {
+            uuid = { type = "string", format = "uuid", description = "The ATS application's uuid" },
+            stage = S, name = S, email = S, phone = S, links = STRINGS, cover_letter = S,
+            applied_at = { type = "string", format = "date-time" },
         },
     })
     local SectorCount = schema("SectorCount", {
@@ -192,7 +231,6 @@ return function(app)
         properties = { sector = { type = "string", enum = LISTING_FIELDS.sector.enum }, count = { type = "integer" } },
     })
     local CSV = function(d) return { type = "string", description = d } end
-    local INCLUDE_SAMPLES = { type = "string", enum = { "true", "false" }, description = "Include sample (test) listings" }
 
     sdk.doc(app, "GET /jobs", {
         summary = "Search open job listings, newest first", permission = "workerra_jobs.read",
@@ -203,7 +241,6 @@ return function(app)
             sector = { type = "string", enum = LISTING_FIELDS.sector.enum },
             workplace = CSV("Comma-separated: onsite, hybrid, remote"),
             type = CSV("Comma-separated: full_time, part_time, contract, temporary, internship"),
-            include_samples = INCLUDE_SAMPLES,
         },
     })
     app:get("/jobs", sdk.handler({ permission = "workerra_jobs.read" }, function(self)
@@ -222,10 +259,10 @@ return function(app)
 
     sdk.doc(app, "GET /jobs/sectors", {
         summary = "Open job listings per sector (sectors with none are left out)", permission = "workerra_jobs.read",
-        response = { type = "array", items = SectorCount }, query = { include_samples = INCLUDE_SAMPLES },
+        response = { type = "array", items = SectorCount },
     })
     app:get("/jobs/sectors", sdk.handler({ permission = "workerra_jobs.read" }, function(self)
-        local where = table.concat(visible(sdk.namespace_id(self), self.params), " AND ")
+        local where = table.concat(visible(sdk.namespace_id(self)), " AND ")
         local rows = db.query([[SELECT l.sector, COUNT(*)::int AS count FROM workerra_job_listings l
             JOIN ats_jobs j ON j.id = l.ats_job_id AND j.namespace_id = l.namespace_id
             WHERE ]] .. where .. " GROUP BY l.sector ORDER BY l.sector")
@@ -234,11 +271,11 @@ return function(app)
 
     sdk.doc(app, "GET /jobs/:uuid", {
         summary = "One open job listing", permission = "workerra_jobs.read",
-        path = { uuid = { type = "string", format = "uuid" } }, query = { include_samples = INCLUDE_SAMPLES },
-        response = Job, errors = { ["404"] = "Not listed (unknown, closed, unpublished or a hidden sample)" },
+        path = { uuid = { type = "string", format = "uuid" } },
+        response = Job, errors = { ["404"] = "Not listed (unknown, closed, past its closing date or unpublished)" },
     })
     app:get("/jobs/:uuid", sdk.handler({ permission = "workerra_jobs.read" }, function(self)
-        local where = visible(sdk.namespace_id(self), self.params)
+        local where = visible(sdk.namespace_id(self))
         where[#where + 1] = "j.uuid = " .. db.escape_literal(tostring(self.params.uuid))
         local r = db.query(SELECT .. " WHERE " .. table.concat(where, " AND "))[1]
         if not r then return sdk.not_found("Job") end
@@ -260,7 +297,6 @@ return function(app)
                 salary_period = { type = "string", enum = { "hour", "day", "year" } },
                 responsibilities = STRINGS, requirements = STRINGS, benefits = STRINGS, skills = STRINGS,
                 closes_at = { type = "string", format = "date" },
-                sample = { type = "boolean", description = "Mark as test data" },
             },
         },
         response = Job,
@@ -293,7 +329,6 @@ return function(app)
             salary_min = data.salary_min or db.NULL, salary_max = data.salary_max or db.NULL,
             salary_currency = data.salary_currency and data.salary_currency:upper() or "GBP",
             salary_period = data.salary_period or db.NULL, closes_at = data.closes_at or db.NULL,
-            is_sample = data.sample == true,
             responsibilities = lists.responsibilities or "[]", requirements = lists.requirements or "[]",
             benefits = lists.benefits or "[]", skills = lists.skills or "[]",
         }
@@ -311,4 +346,141 @@ return function(app)
         local r = db.query(SELECT .. " WHERE l.ats_job_id = ?", job.id)[1]
         return sdk.ok(job_out(r))
     end))
+
+    sdk.doc(app, "POST /jobs/:uuid/applications", {
+        summary = "Apply for an open job listing",
+        description = "Adds the applicant to the ATS as a candidate (matched by email) with an application "
+            .. "for this job at the 'applied' stage. The cover letter is kept as a note on the application.",
+        permission = "workerra_jobs.create", path = { uuid = { type = "string", format = "uuid" } },
+        body = {
+            type = "object", required = { "name", "email" },
+            properties = { name = S, email = S, phone = S, cover_letter = S,
+                links = { type = "array", items = S, description = "Up to 5 http(s) links: CV, LinkedIn, portfolio" } },
+        },
+        response = Application,
+        errors = { ["404"] = "Not listed", ["409"] = "This email has already applied for this job",
+            ["422"] = "Invalid application" },
+    })
+    app:post("/jobs/:uuid/applications", sdk.handler({ permission = "workerra_jobs.create" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local body, err = sdk.body(self)
+        if not body then return sdk.error(400, err) end
+        for k in pairs(APPLICATION_FIELDS) do body[k] = trimmed(body[k]) end
+        if body.phone == "" then body.phone = nil end
+        if body.cover_letter == "" then body.cover_letter = nil end
+        local data, errors = sdk.validate(body, APPLICATION_FIELDS)
+        errors = errors or {}
+        if data and not valid_email(data.email) then errors.email = "must be an email address" end
+        local links = {}
+        if body.links ~= nil then
+            if type(body.links) ~= "table" or #body.links > 5 then
+                errors.links = "must be a list of up to 5 links"
+            else
+                for i, u in ipairs(body.links) do
+                    u = trimmed(u)
+                    if not valid_url(u) then errors.links = "link " .. i .. " must start with http:// or https://" break end
+                    links[#links + 1] = u
+                end
+            end
+        end
+        if not data or next(errors) then return sdk.error(422, "Validation failed", errors) end
+
+        local where = visible(ns)
+        where[#where + 1] = "j.uuid = " .. db.escape_literal(tostring(self.params.uuid))
+        local job = db.query("SELECT j.uuid, j.title FROM workerra_job_listings l JOIN ats_jobs j ON j.id = l.ats_job_id "
+            .. "AND j.namespace_id = l.namespace_id WHERE " .. table.concat(where, " AND "))[1]
+        if not job then return sdk.not_found("Job") end
+
+        local cand, cerr = ATS.find_or_create_candidate(ns, { name = data.name, email = data.email:lower(),
+            phone = data.phone, links = sdk.array(links) }, nil, "workerra")
+        if not cand then return sdk.error(422, "Validation failed", { email = cerr }) end
+        if db.select("1 FROM ats_applications a JOIN ats_jobs j ON j.id = a.job_id WHERE a.candidate_id = ? AND j.uuid = ?",
+            cand.id, job.uuid)[1] then
+            return sdk.error(409, "You've already applied for this job with that email address.")
+        end
+        local application, aerr = ATS.create_application(ns, job.uuid, cand.uuid, nil, "applied")
+        if not application then return sdk.error(422, aerr) end
+        if data.cover_letter then
+            ATS.add_note(ns, cand.uuid, { body = data.cover_letter, application_uuid = application.uuid }, nil,
+                data.name .. " (cover letter)")
+        end
+        sdk.emit(ns, "workerra.application_received", { job_uuid = job.uuid, application_uuid = application.uuid })
+        return sdk.created({ uuid = application.uuid, stage = application.stage, name = data.name,
+            email = data.email:lower(), phone = data.phone or cjson.null, links = sdk.array(links),
+            cover_letter = data.cover_letter or cjson.null, applied_at = application.created_at })
+    end))
+
+    -- The workspace's listings (any ATS status), with whether visitors can see them and how many applied.
+    local LISTING_SELECT = [[
+        SELECT j.uuid, j.title, l.company, j.location, j.status, l.published_at::text AS published_at,
+               l.closes_at::text AS closes_at,
+               (j.status = 'open' AND (l.closes_at IS NULL OR l.closes_at >= CURRENT_DATE)) AS listed,
+               (SELECT COUNT(*) FROM ats_applications a WHERE a.job_id = j.id)::int AS applications
+        FROM workerra_job_listings l
+        JOIN ats_jobs j ON j.id = l.ats_job_id AND j.namespace_id = l.namespace_id
+        WHERE l.namespace_id = ? AND j.deleted_at IS NULL
+    ]]
+    local function listing_out(r)
+        return { uuid = r.uuid, title = r.title, company = r.company,
+            location = r.location ~= db.NULL and r.location or "", status = r.status, listed = r.listed == true,
+            applications = r.applications, posted_at = date_only(r.published_at),
+            closes_at = date_only(r.closes_at) or cjson.null }
+    end
+
+    sdk.doc(app, "GET /listings", {
+        summary = "The workspace's job listings, newest first, whatever their ATS status",
+        permission = "workerra_jobs.update", paginated = true, response = { type = "array", items = Listing },
+    })
+    app:get("/listings", sdk.handler({ permission = "workerra_jobs.update" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local page, per_page, offset = sdk.page(self.params)
+        local total = db.query([[SELECT COUNT(*)::int AS n FROM workerra_job_listings l
+            JOIN ats_jobs j ON j.id = l.ats_job_id AND j.namespace_id = l.namespace_id
+            WHERE l.namespace_id = ? AND j.deleted_at IS NULL]], ns)[1].n
+        local rows = db.query(LISTING_SELECT .. " ORDER BY l.published_at DESC, l.id DESC LIMIT ? OFFSET ?",
+            ns, per_page, offset)
+        local out = {}
+        for i, r in ipairs(rows) do out[i] = listing_out(r) end
+        return sdk.ok(sdk.array(out), { page = page, per_page = per_page, total = total,
+            total_pages = math.max(1, math.ceil(total / per_page)) })
+    end))
+
+    sdk.doc(app, "GET /listings/:uuid", {
+        summary = "One of the workspace's job listings, whatever its ATS status",
+        permission = "workerra_jobs.update", path = { uuid = { type = "string", format = "uuid" } },
+        response = Listing, errors = { ["404"] = "No such listing in this workspace" },
+    })
+    app:get("/listings/:uuid", sdk.handler({ permission = "workerra_jobs.update" }, function(self)
+        local r = db.query(LISTING_SELECT .. " AND j.uuid = ?", sdk.namespace_id(self), tostring(self.params.uuid))[1]
+        if not r then return sdk.not_found("Listing") end
+        return sdk.ok(listing_out(r))
+    end))
+
+    sdk.doc(app, "GET /listings/:uuid/applications", {
+        summary = "Applications for one of the workspace's listings, newest first",
+        permission = "workerra_jobs.update", path = { uuid = { type = "string", format = "uuid" } },
+        response = { type = "array", items = Application }, errors = { ["404"] = "No such listing in this workspace" },
+    })
+    app:get("/listings/:uuid/applications", sdk.handler({ permission = "workerra_jobs.update" }, function(self)
+        local ns = sdk.namespace_id(self)
+        local job = db.query([[SELECT j.id FROM workerra_job_listings l JOIN ats_jobs j ON j.id = l.ats_job_id
+            WHERE l.namespace_id = ? AND j.uuid = ? AND j.deleted_at IS NULL]],
+            ns, tostring(self.params.uuid))[1]
+        if not job then return sdk.not_found("Listing") end
+        local rows = db.query([[
+            SELECT a.uuid, a.stage, a.created_at, c.name, c.email, c.phone, c.links,
+                   (SELECT n.body FROM ats_notes n WHERE n.application_id = a.id AND n.author_uuid IS NULL
+                     ORDER BY n.id LIMIT 1) AS cover_letter
+            FROM ats_applications a JOIN ats_candidates c ON c.id = a.candidate_id
+            WHERE a.namespace_id = ? AND a.job_id = ? ORDER BY a.id DESC LIMIT 500]], ns, job.id)
+        local out = {}
+        for i, r in ipairs(rows) do
+            out[i] = { uuid = r.uuid, stage = r.stage, name = r.name,
+                email = r.email ~= db.NULL and r.email or "", phone = r.phone ~= db.NULL and r.phone or cjson.null,
+                links = json_list(r.links), cover_letter = r.cover_letter ~= db.NULL and r.cover_letter or cjson.null,
+                applied_at = r.created_at }
+        end
+        return sdk.ok(sdk.array(out))
+    end))
+
 end

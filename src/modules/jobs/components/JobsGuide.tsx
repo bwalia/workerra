@@ -77,8 +77,8 @@ const jobsFaq = (): readonly FaqItem[] => [
     question: "Are these real vacancies?",
     answer: (
       <p>
-        Listings marked <strong>Sample</strong> are test data we use while Workerra is being built. The companies are made
-        up and you can&rsquo;t apply for them. Real vacancies don&rsquo;t carry the Sample label.
+        Yes. Every listing is published by the employer or recruiter hiring for it, and comes down when they close it or
+        its closing date passes.
       </p>
     ),
   },
@@ -86,7 +86,9 @@ const jobsFaq = (): readonly FaqItem[] => [
     question: "How do I apply for a job?",
     answer: (
       <p>
-        Applying through Workerra isn&rsquo;t available yet. In the meantime, the{" "}
+        Open the job and fill in the form under &ldquo;Apply for this job&rdquo;: your name, email, a cover letter and
+        links to your CV or LinkedIn profile. It goes straight to the recruiter, and you don&rsquo;t need an account.
+        Before you send it, the{" "}
         <Link href={chatHref("Help me tailor my CV to a job")} className={LINK}>
           assistant
         </Link>{" "}

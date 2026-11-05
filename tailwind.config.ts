@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import defaultTheme from "tailwindcss/defaultTheme";
 
 // Theme-aware colours are CSS variables (RGB channels) set in globals.css for
 // light and .dark, so components use one class (bg-surface, text-ink) and
@@ -10,6 +11,11 @@ const config: Config = {
   darkMode: "class",
   theme: {
     extend: {
+      // Variables are set on <html> by next/font (src/shared/ui/fonts.ts).
+      fontFamily: {
+        sans: ["var(--font-sans)", ...defaultTheme.fontFamily.sans],
+        display: ["var(--font-display)", "var(--font-sans)", ...defaultTheme.fontFamily.sans],
+      },
       colors: {
         brand: {
           50: "#eef7ff",

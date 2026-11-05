@@ -1,6 +1,6 @@
 # OpsAPI with Workerra's plugin baked in: the image the dedicated Workerra OpsAPI
 # backend runs (deploy/helm/workerra/templates/opsapi.yaml), published as
-# bwalia/workerra-opsapi:<sha>. Same approach as closeknitty's opsapi/Dockerfile
+# harneetk78/workerra-opsapi:<sha>. Same approach as closeknitty's opsapi/Dockerfile
 # and diy-tax-return-uk's Dockerfile.migrations: the public OpsAPI image supplies
 # lapis and helper.project-migrator, and the plugin sits at
 # /app/projects/workerra/, where OpsAPI's plugin loader and migrator find it.

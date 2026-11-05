@@ -1,6 +1,6 @@
 import { parseJobSearchParams } from "@/modules/jobs";
 import { jobSource } from "@/modules/jobs/server";
-import { Benefits, CallToAction, FeaturedJobs, HomeFaq, HomeHero, HowItWorks } from "@/modules/marketing";
+import { Benefits, CallToAction, FeaturedJobs, HomeFaq, HomeHero, HowItWorks, Sectors } from "@/modules/marketing";
 import { logger } from "@/shared/logging";
 
 // Which listings a ring serves depends on runtime env (one image per ring), so never prerender.
@@ -26,6 +26,7 @@ export default async function HomePage() {
       <HomeHero />
       <HowItWorks />
       <Benefits />
+      <Sectors />
       <FeaturedJobs jobs={featured} failed={failed} />
       <HomeFaq />
       <CallToAction />
