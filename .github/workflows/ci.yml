@@ -49,6 +49,8 @@ jobs:
               helm template workerra "$CHART" -n int "${args[@]}" > /dev/null
             done
           done
+      - name: Shellcheck the Vault token refresher
+        run: shellcheck -s sh deploy/helm/workerra/files/vault-token-refresh.sh
       - name: Dockerfile.opsapi copies the plugin
         run: |
           set -euo pipefail

@@ -196,15 +196,98 @@ redeploy the ring from Ring Promoter or `kubectl -n <ring> rollout restart deplo
 **Workerra's own tenant.** With `ownVaultStore.enabled` (on in `values-int.yaml`)
 the chart creates a namespaced `SecretStore workerra-vault` and every Workerra
 ExternalSecret reads through it instead of `wslvault-backend`. INT reads the
-`Workerra-int-tenant` tenant. Before enabling it on a ring:
+`Workerra-int-tenant` tenant.
 
-1. In the tenant, write every key the ring needs (at least `SESSION_SECRET`,
+WSLVault is not HashiCorp Vault: ESO authenticates with a WSLVault session
+**JWT**, which lives **one hour**. A long-lived machine **API key** (`wslv_…`) is
+traded for a JWT at `POST /v1/auth/api-key`. With
+`ownVaultStore.tokenRefresh.enabled` (on in `values-int.yaml`) the chart runs
+CronJob `workerra-vault-token-refresh` every 30 minutes, which makes that trade
+and patches the JWT into `workerra-vault-token`. It is modelled on
+`wslvpn/wslvault-token-refresh` and changes nothing outside the ring namespace.
+
+Each run, before writing anything, the refresher checks that the key:
+
+- belongs to the tenant named in the API key Secret;
+- carries exactly `tokenRefresh.expectedPolicies`, and no `root`, `admin` or
+  `wslvault:platform-admin`;
+- returns a JWT that `lookup-self` (the call ESO validates with) accepts in
+  that tenant.
+
+It retries network errors, 408/425/429 and 5xx with backoff, and treats
+anything else as final. The token and its expiry annotations
+(`workerra.uk/token-refreshed-at`, `workerra.uk/token-expires-at`) land in one
+merge patch. The key and JWT are never logged. RBAC is a Role that can only
+`get`/`patch` the one token Secret.
+
+### Initial setup (once per ring)
+
+The WSLVault calls need a session token for an admin of the ring's tenant
+(`ADMIN`, from your own `wslv_` key at `POST /v1/auth/api-key`) and the tenant
+id (`TENANT`, from `GET /v1/auth/token/lookup-self` → `.data.meta.tenant_id`).
+See `wslvault/docs/operations/obtaining-credentials.md`.
+
+1. In the tenant, write every key the ring needs (at least `SESSION_SECRET` and
    `CONTACT_EMAIL` at `workerra/<ring>/core`, environment set to the ring).
-2. Create a token in that tenant whose policy is **read-only** on
-   `kv/data/workerra/*` (not `root`/`admin`).
-3. Store it in the ring namespace yourself, never in chat or a log:
-   `kubectl -n <ring> create secret generic workerra-vault-token --from-literal=token=...`
-   (`read -s` first to keep it out of shell history).
+2. Create a read-only policy for that ring only. WSLVault authorises a KV read
+   of `kv/data/<path>` as the resource `secret/data/<path>`. Policies are scoped
+   to the tenant, and `**` matches any depth:
+
+   ```bash
+   curl -s -X PUT https://vault.workstation.co.uk/v1/policies/workerra-int-eso-read \
+     -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
+     -d '{"name":"workerra-int-eso-read","rules":[{"paths":["secret/data/workerra/int/**"],"capabilities":["read"]}]}'
+   ```
+
+3. Mint a machine key with only that policy and no MFA, straight into a
+   `0600` file. The raw key is shown once:
+
+   ```bash
+   curl -s -X POST https://vault.workstation.co.uk/v1/api-keys \
+     -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
+     -d "{\"name\":\"workerra-int-eso\",\"tenant_id\":\"$TENANT\",\"policies\":[\"workerra-int-eso-read\"]}" \
+     | (umask 077; jq -r .key > ~/workerra-int-eso.key)
+   ```
+
+4. Store the key and the tenant id it must belong to, then delete the file:
+
+   ```bash
+   kubectl -n int create secret generic workerra-vault-apikey \
+     --from-file=api_key="$HOME/workerra-int-eso.key" --from-literal=tenant_id="$TENANT"
+   rm ~/workerra-int-eso.key
+   ```
+
+5. `workerra-vault-token` must already exist, because the Role can patch it but
+   not create it. If it doesn't, create it with a placeholder:
+   `kubectl -n int create secret generic workerra-vault-token --from-literal=token=pending`.
+6. Deploy, then run the refresher once instead of waiting up to 30 minutes, and
+   check the store:
+
+   ```bash
+   kubectl -n int create job --from=cronjob/workerra-vault-token-refresh workerra-vault-token-refresh-now
+   kubectl -n int logs -f job/workerra-vault-token-refresh-now
+   kubectl -n int get secretstore workerra-vault        # Ready=True
+   kubectl -n int get externalsecret workerra-core      # SecretSynced
+   kubectl -n int delete job workerra-vault-token-refresh-now
+   ```
+
+### Recovery
+
+- **Store unready, or `token-expires-at` in the past:** read the last run's log
+  (`kubectl -n int logs job/<latest workerra-vault-token-refresh-…>`), fix the
+  cause, then run step 6.
+- **`api-key exchange refused: HTTP 404 key_not_found`:** the key was revoked,
+  or identity-service lost it (keys are per region). Mint a new one (step 3) and
+  replace the Secret:
+  `kubectl -n int create secret generic workerra-vault-apikey --from-file=api_key=… --from-literal=tenant_id="$TENANT" --dry-run=client -o yaml | kubectl apply -f -`.
+- **`policies are […], expected […]`, `administrative policy`, `requires MFA`
+  or `belongs to tenant`:** the key is not the read-only machine key for this
+  ring. Mint a correct one; never widen `expectedPolicies` to match a broader key.
+- **Rotate the key:** `POST /v1/api-keys/<id>/rotate`, replace the Secret as
+  above, run step 6, then revoke anything that was exposed.
+- **Pause:** `--set ownVaultStore.tokenRefresh.suspend=true` (or
+  `kubectl -n int patch cronjob workerra-vault-token-refresh -p '{"spec":{"suspend":true}}'`
+  until the next deploy).
 
 If the store can't authenticate, the ExternalSecrets go unready but the existing
 `workerra-<name>` Secrets are kept (deletionPolicy Retain), so the pods keep running.

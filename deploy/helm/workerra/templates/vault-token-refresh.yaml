@@ -1,0 +1,162 @@
+{{- /*
+  Keeps Secret <ownVaultStore.tokenSecret> holding a live WSLVault session JWT.
+  WSLVault JWTs last one hour and ESO accepts only a JWT, so a CronJob trades
+  the long-lived machine API key in Secret <tokenRefresh.apiKeySecret> for a
+  fresh one. Modelled on wslvpn/wslvault-token-refresh. The API key Secret is
+  created by hand (docs/environments.md, "Secrets") and never by the chart.
+*/}}
+{{- $refresh := .Values.ownVaultStore.tokenRefresh }}
+{{- if $refresh.enabled }}
+{{- if not .Values.ownVaultStore.enabled }}
+{{- fail "ownVaultStore.tokenRefresh.enabled needs ownVaultStore.enabled" }}
+{{- end }}
+{{- if not $refresh.expectedPolicies }}
+{{- fail "ownVaultStore.tokenRefresh.expectedPolicies must list the API key's policies" }}
+{{- end }}
+{{- $tokenSecret := required "ownVaultStore.tokenSecret is required" .Values.ownVaultStore.tokenSecret }}
+{{- $apiKeySecret := required "ownVaultStore.tokenRefresh.apiKeySecret is required" $refresh.apiKeySecret }}
+{{- if eq $tokenSecret $apiKeySecret }}
+{{- fail "ownVaultStore.tokenRefresh.apiKeySecret must differ from ownVaultStore.tokenSecret" }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# Only the token Secret, only get/patch: no list, no create, no other Secret.
+# The API key Secret is mounted by the kubelet, so it needs no API access.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $tokenSecret | quote }}]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: workerra-vault-token-refresh
+subjects:
+  - kind: ServiceAccount
+    name: workerra-vault-token-refresh
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+data:
+  refresh.sh: |-
+{{ .Files.Get "files/vault-token-refresh.sh" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+    app.kubernetes.io/name: workerra-vault-token-refresh
+spec:
+  schedule: {{ $refresh.schedule | quote }}
+  suspend: {{ $refresh.suspend }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "workerra.labels" . | nindent 12 }}
+            app.kubernetes.io/name: workerra-vault-token-refresh
+        spec:
+          serviceAccountName: workerra-vault-token-refresh
+          automountServiceAccountToken: true
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: refresh
+              image: "{{ $refresh.image.repository }}:{{ $refresh.image.tag }}"
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "/script/refresh.sh"]
+              env:
+                - name: VAULT_ADDR
+                  value: {{ .Values.ownVaultStore.server | quote }}
+                - name: NAMESPACE
+                  value: {{ .Release.Namespace | quote }}
+                - name: TARGET_SECRET
+                  value: {{ $tokenSecret | quote }}
+                - name: EXPECTED_POLICIES
+                  value: {{ join "," $refresh.expectedPolicies | quote }}
+                - name: MAX_ATTEMPTS
+                  value: {{ $refresh.maxAttempts | quote }}
+                - name: HOME
+                  value: /work
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: key
+                  mountPath: /key
+                  readOnly: true
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+          volumes:
+            - name: key
+              secret:
+                secretName: {{ $apiKeySecret | quote }}
+                # Optional so a missing Secret fails the run with a clear log
+                # line rather than a pod stuck in CreateContainerConfigError.
+                optional: true
+                defaultMode: 0440
+                items:
+                  - key: api_key
+                    path: api_key
+                  - key: tenant_id
+                    path: tenant_id
+            - name: script
+              configMap:
+                name: workerra-vault-token-refresh
+                defaultMode: 0444
+            - name: work
+              emptyDir:
+                medium: Memory
+                sizeLimit: 1Mi
+{{- end }}
