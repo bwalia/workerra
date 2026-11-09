@@ -21,8 +21,7 @@ metadata:
 spec:
   refreshInterval: 1m
   secretStoreRef:
-    kind: ClusterSecretStore
-    name: {{ .Values.vaultStore }}
+    {{- include "workerra.secretStoreRef" . | nindent 4 }}
   target:
     name: workerra-opsapi
     creationPolicy: Owner
