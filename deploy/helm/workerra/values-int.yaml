@@ -14,10 +14,10 @@ ownVaultStore:
 vaultSecrets:
   core: workerra/int/core
 
-# Workerra's OpsAPI backend: OFF until the setup in docs/environments.md
-# ("Workerra OpsAPI backend") is done and approved.
+# Workerra's OpsAPI backend (docs/environments.md, "Workerra OpsAPI backend").
+# Needs Vault workerra/int/opsapi; the web app's OPSAPI_API_KEY is in workerra/int/core.
 opsapi:
-  enabled: false
+  enabled: true
   vaultSecret: workerra/int/opsapi
 
 extraEnv:

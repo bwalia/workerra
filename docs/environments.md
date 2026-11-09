@@ -98,8 +98,8 @@ All done for INT.
 
 ## Workerra OpsAPI backend
 
-> **Status: off everywhere.** `opsapi.enabled` is `false` in the chart and in
-> `values-int.yaml`, and the deploy switch above is off too. Nothing below has been done.
+> **Status: on for INT** (`values-int.yaml`), off by default in the chart.
+> TEST, ACC and PROD have no backend yet.
 
 Workerra runs its **own** OpsAPI for job listings, the same way CloseKnitty runs
 `closeknitty-opsapi`. The shared Workstation OpsAPI (`workstation-opsapi`) is not
