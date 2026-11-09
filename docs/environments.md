@@ -300,8 +300,9 @@ WSLVault console is getting your admin key, if you don't already have it.
      *) echo "STOP: HTTP $code" ;;
    esac
    sleep 6   # every policy-engine replica reloads from the database within ~5s
-   curl -fsS "$VAULT_ADDR/v1/policies/workerra-read" -K <(bh) | jq -e --argjson w "$WANT" '.rules == $w.rules' \
-     && echo "workerra-read verified"
+   curl -fsS "$VAULT_ADDR/v1/policies/workerra-read" -K <(bh) 2>/dev/null \
+     | jq -e --argjson w "$WANT" '.rules == $w.rules' >/dev/null 2>&1 \
+     && echo "workerra-read verified" || echo "STOP: workerra-read is missing or has other rules"
    rm -f /tmp/workerra-read.json
    unset VAULT_TOKEN
    ```
