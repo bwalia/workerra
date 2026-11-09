@@ -5,10 +5,11 @@
 # WSLVault session JWTs live one hour (identity-service API_KEY_JWT_TTL_SECONDS)
 # and ESO accepts only a JWT, so this runs from a CronJob well inside that hour.
 #
-# Secrets never reach argv, stdout or stderr: the key is read from the mounted
-# Secret by jq and sent on curl's stdin, the token travels in files in the pod's
-# in-memory emptyDir and in a curl header file, and error output carries only
-# the HTTP status and the server's short message.
+# Secrets never reach argv, stdout or stderr: jq copies the key from the
+# mounted Secret into a 0600 request file in the pod's in-memory emptyDir, curl
+# sends it from there, the token travels only in such files and a curl header
+# file, and error output carries only the HTTP status and the server's short
+# error text.
 #
 # Env: VAULT_ADDR, NAMESPACE, TARGET_SECRET, EXPECTED_POLICIES (comma list),
 #      MAX_ATTEMPTS (default 5), KEY_DIR (default /key), WORK (default /work).
@@ -20,6 +21,10 @@ umask 077
 : "${NAMESPACE:?NAMESPACE is required}"
 : "${TARGET_SECRET:?TARGET_SECRET is required}"
 : "${EXPECTED_POLICIES:?EXPECTED_POLICIES is required}"
+case "$VAULT_ADDR" in
+  https://*) ;;
+  *) echo "workerra-vault-token-refresh: VAULT_ADDR must be https://" >&2; exit 1 ;;
+esac
 KEY_DIR=${KEY_DIR:-/key}
 WORK=${WORK:-/work}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-5}
@@ -45,7 +50,8 @@ expected_tenant=$(tr -d ' \t\r\n' <"$KEY_DIR/tenant_id")
 
 # Only the server's code/message, capped: never the body itself.
 err_summary() {
-  jq -r '[.code?, .message?] | map(select(. != null) | tostring) | join(": ")' "$1" 2>/dev/null |
+  jq -r '[.code?, .message?, ((.errors? // []) | map(tostring) | join("; "))]
+    | map(select(. != null and . != "") | tostring) | join(": ")' "$1" 2>/dev/null |
     tr -d '\r\n' | cut -c1-160 || true
 }
 
@@ -69,24 +75,31 @@ with_retry() {
     log "$label attempt $attempt failed (HTTP $code); retrying in ${delay}s"
     sleep "$delay"
     attempt=$((attempt + 1))
-    delay=$((delay * 2))
+    # Capped so a whole run (three calls) stays inside activeDeadlineSeconds.
+    [ "$delay" -ge 20 ] || delay=$((delay * 2))
   done
 }
 
 exchange() {
   rm -f "$WORK/resp.json"
   jq -nc --rawfile k "$KEY_DIR/api_key" '{api_key: ($k | gsub("^\\s+|\\s+$"; ""))}' >"$WORK/req.json"
-  code=$(curl -sS -o "$WORK/resp.json" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
+  rc=0
+  code=$(curl -sS --proto =https -o "$WORK/resp.json" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
     -X POST -H 'Content-Type: application/json' --data-binary @"$WORK/req.json" \
-    "$VAULT_ADDR/v1/auth/api-key") || true
+    "$VAULT_ADDR/v1/auth/api-key") || rc=$?
   rm -f "$WORK/req.json"
+  # A transfer error after the status line (e.g. a timeout mid-body) is a
+  # network failure, not a 200.
+  [ "$rc" -eq 0 ] || code=000
 }
 
 # ESO validates a store through lookup-self, so the new token must pass it too.
 lookup() {
   rm -f "$WORK/lookup.json"
-  code=$(curl -sS -o "$WORK/lookup.json" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
-    -H @"$WORK/hdr" "$VAULT_ADDR/v1/auth/token/lookup-self") || true
+  rc=0
+  code=$(curl -sS --proto =https -o "$WORK/lookup.json" -w '%{http_code}' --connect-timeout 10 --max-time 30 \
+    -H @"$WORK/hdr" "$VAULT_ADDR/v1/auth/token/lookup-self") || rc=$?
+  [ "$rc" -eq 0 ] || code=000
   cp "$WORK/lookup.json" "$WORK/resp.json" 2>/dev/null || true
 }
 
@@ -135,7 +148,8 @@ cp "$WORK/resp.json" "$WORK/exchange.json"
 with_retry "token lookup" lookup
 rm -f "$WORK/hdr"
 mv "$WORK/exchange.json" "$WORK/resp.json"
-looked_up=$(jq -r '.data.meta.tenant_id // empty' "$WORK/lookup.json")
+looked_up=$(jq -r '.data.meta.tenant_id // empty' "$WORK/lookup.json" 2>/dev/null) ||
+  fail "lookup-self returned a non-JSON body"
 [ "$looked_up" = "$expected_tenant" ] ||
   fail "lookup-self reports tenant '${looked_up:-unknown}', expected '$expected_tenant'; not updating"
 

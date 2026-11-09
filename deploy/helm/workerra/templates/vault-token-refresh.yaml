@@ -13,6 +13,9 @@
 {{- if not $refresh.expectedPolicies }}
 {{- fail "ownVaultStore.tokenRefresh.expectedPolicies must list the API key's policies" }}
 {{- end }}
+{{- if not (hasPrefix "https://" .Values.ownVaultStore.server) }}
+{{- fail "ownVaultStore.server must be an https:// URL" }}
+{{- end }}
 {{- $tokenSecret := required "ownVaultStore.tokenSecret is required" .Values.ownVaultStore.tokenSecret }}
 {{- $apiKeySecret := required "ownVaultStore.tokenRefresh.apiKeySecret is required" $refresh.apiKeySecret }}
 {{- if eq $tokenSecret $apiKeySecret }}
@@ -158,5 +161,6 @@ spec:
             - name: work
               emptyDir:
                 medium: Memory
-                sizeLimit: 1Mi
+                # Also holds kubectl's discovery cache (HOME=/work).
+                sizeLimit: 16Mi
 {{- end }}

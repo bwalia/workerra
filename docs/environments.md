@@ -243,11 +243,15 @@ See `wslvault/docs/operations/obtaining-credentials.md`.
    `0600` file. The raw key is shown once:
 
    ```bash
-   curl -s -X POST https://vault.workstation.co.uk/v1/api-keys \
+   curl -fsS -X POST https://vault.workstation.co.uk/v1/api-keys \
      -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
      -d "{\"name\":\"workerra-int-eso\",\"tenant_id\":\"$TENANT\",\"policies\":[\"workerra-int-eso-read\"]}" \
-     | (umask 077; jq -r .key > ~/workerra-int-eso.key)
+     | (umask 077; jq -er '.id, .key' > ~/workerra-int-eso.mint)
+   sed -n 1p ~/workerra-int-eso.mint          # the key id: note it for rotation
+   (umask 077; sed -n 2p ~/workerra-int-eso.mint > ~/workerra-int-eso.key) && rm ~/workerra-int-eso.mint
    ```
+
+   `-f` and `jq -e` stop a failed call from writing `null` into the key file.
 
 4. Store the key and the tenant id it must belong to, then delete the file:
 
@@ -279,7 +283,10 @@ See `wslvault/docs/operations/obtaining-credentials.md`.
 - **`api-key exchange refused: HTTP 404 key_not_found`:** the key was revoked,
   or identity-service lost it (keys are per region). Mint a new one (step 3) and
   replace the Secret:
-  `kubectl -n int create secret generic workerra-vault-apikey --from-file=api_key=… --from-literal=tenant_id="$TENANT" --dry-run=client -o yaml | kubectl apply -f -`.
+  `kubectl -n int create secret generic workerra-vault-apikey --from-file=api_key=… --from-literal=tenant_id="$TENANT" --dry-run=client -o yaml | kubectl replace -f -`.
+  Use `replace`, never `apply`: client-side `apply` copies the whole Secret,
+  key included, into the `last-applied-configuration` annotation, which
+  `kubectl describe` prints in clear.
 - **`policies are […], expected […]`, `administrative policy`, `requires MFA`
   or `belongs to tenant`:** the key is not the read-only machine key for this
   ring. Mint a correct one; never widen `expectedPolicies` to match a broader key.
