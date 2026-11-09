@@ -1,23 +1,23 @@
 {{- /*
-  Keeps Secret <ownVaultStore.tokenSecret> holding a live WSLVault session JWT.
-  WSLVault JWTs last one hour and ESO accepts only a JWT, so a CronJob trades
-  the long-lived machine API key in Secret <tokenRefresh.apiKeySecret> for a
-  fresh one. Modelled on wslvpn/wslvault-token-refresh. The API key Secret is
-  created by hand (docs/environments.md, "Secrets") and never by the chart.
+  The shared WSLVault token refresher (wslvpn/deploy/environments/k3s1/
+  wslvault-store.yaml) for Workerra's own tenant: same schedule, image, RBAC,
+  pod security, retries and flow. Only the names differ, the expected tenant
+  comes from the API key Secret (Workerra's repo carries no tenant ids), and
+  it is a Helm template because Workerra shares the ring namespace.
+
+  External Secrets can only use a pre-issued WSLVault JWT, which lasts an hour,
+  so the CronJob trades the machine API key in Secret <apiKeySecret> for a
+  fresh one every 30 minutes and patches it into <ownVaultStore.tokenSecret>.
+  Neither Secret is in the chart: re-applying an empty token would wipe the
+  live one, and the key is created out of band by deploy/wslvault-refresher-key.sh.
 */}}
 {{- $refresh := .Values.ownVaultStore.tokenRefresh }}
 {{- if $refresh.enabled }}
 {{- if not .Values.ownVaultStore.enabled }}
 {{- fail "ownVaultStore.tokenRefresh.enabled needs ownVaultStore.enabled" }}
 {{- end }}
-{{- if not $refresh.expectedPolicies }}
-{{- fail "ownVaultStore.tokenRefresh.expectedPolicies must list the API key's policies" }}
-{{- end }}
 {{- if not (hasPrefix "https://" .Values.ownVaultStore.server) }}
 {{- fail "ownVaultStore.server must be an https:// URL" }}
-{{- end }}
-{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" ($refresh.image.digest | default "")) }}
-{{- fail "ownVaultStore.tokenRefresh.image.digest must be a sha256: digest; the job holds the API key, so its image is pinned" }}
 {{- end }}
 {{- $tokenSecret := required "ownVaultStore.tokenSecret is required" .Values.ownVaultStore.tokenSecret }}
 {{- $apiKeySecret := required "ownVaultStore.tokenRefresh.apiKeySecret is required" $refresh.apiKeySecret }}
@@ -31,13 +31,11 @@ metadata:
   name: workerra-vault-token-refresh
   labels:
     {{- include "workerra.labels" . | nindent 4 }}
-automountServiceAccountToken: false
+automountServiceAccountToken: true
 ---
-# Only the token Secret, only get/patch: no list, watch, create or delete, and
-# no other Secret. `get` is needed because `kubectl patch` reads the object
-# before it sends the PATCH (traced with the pinned kubectl 1.30.2: GET then
-# PATCH on secrets/<name>; without get it fails Forbidden). The API key Secret
-# is mounted by the kubelet, so it needs no API access.
+# Get and patch one named Secret. Nothing else: it cannot read the API key
+# through the API (that is a mounted file), nor any other Secret. `get` is
+# needed: kubectl patch GETs the object before it PATCHes it.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -46,9 +44,9 @@ metadata:
     {{- include "workerra.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["secrets"]
+    resources: [secrets]
     resourceNames: [{{ $tokenSecret | quote }}]
-    verbs: ["get", "patch"]
+    verbs: [get, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -83,16 +81,17 @@ metadata:
     {{- include "workerra.labels" . | nindent 4 }}
     app.kubernetes.io/name: workerra-vault-token-refresh
 spec:
+  # Tokens last an hour; refreshing every 30 minutes leaves one failed run of
+  # headroom before the store notices.
   schedule: {{ $refresh.schedule | quote }}
   suspend: {{ $refresh.suspend }}
   concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 600
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      backoffLimit: 3
       activeDeadlineSeconds: 300
-      backoffLimit: 2
       template:
         metadata:
           labels:
@@ -100,73 +99,46 @@ spec:
             app.kubernetes.io/name: workerra-vault-token-refresh
         spec:
           serviceAccountName: workerra-vault-token-refresh
-          automountServiceAccountToken: true
-          restartPolicy: Never
+          restartPolicy: OnFailure
           securityContext:
             runAsNonRoot: true
             runAsUser: 65534
-            runAsGroup: 65534
+            # The key file is mounted group-owned by this, so the non-root
+            # user can read it; nothing else in the pod is.
             fsGroup: 65534
-            seccompProfile:
-              type: RuntimeDefault
+            seccompProfile: { type: RuntimeDefault }
           containers:
             - name: refresh
-              image: "{{ $refresh.image.repository }}:{{ $refresh.image.tag }}@{{ $refresh.image.digest }}"
-              imagePullPolicy: IfNotPresent
-              command: ["/bin/sh", "/script/refresh.sh"]
-              env:
-                - name: VAULT_ADDR
-                  value: {{ .Values.ownVaultStore.server | quote }}
-                - name: NAMESPACE
-                  value: {{ .Release.Namespace | quote }}
-                - name: TARGET_SECRET
-                  value: {{ $tokenSecret | quote }}
-                - name: EXPECTED_POLICIES
-                  value: {{ join "," $refresh.expectedPolicies | quote }}
-                - name: MAX_ATTEMPTS
-                  value: {{ $refresh.maxAttempts | quote }}
-                - name: HOME
-                  value: /work
-              resources:
-                requests:
-                  cpu: 10m
-                  memory: 32Mi
-                limits:
-                  memory: 128Mi
+              image: "{{ $refresh.image.repository }}:{{ $refresh.image.tag }}"
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
-                capabilities:
-                  drop: ["ALL"]
+                capabilities: { drop: [ALL] }
+              command: ["/bin/sh", "/script/refresh.sh"]
+              env:
+                - { name: VAULT_ADDR, value: {{ .Values.ownVaultStore.server | quote }} }
+                - { name: NAMESPACE, value: {{ .Release.Namespace | quote }} }
+                - { name: TARGET_SECRET, value: {{ $tokenSecret | quote }} }
+                - { name: HOME, value: /work }
               volumeMounts:
-                - name: key
-                  mountPath: /key
-                  readOnly: true
-                - name: script
-                  mountPath: /script
-                  readOnly: true
-                - name: work
-                  mountPath: /work
+                - { name: key, mountPath: /key, readOnly: true }
+                - { name: script, mountPath: /script, readOnly: true }
+                - { name: work, mountPath: /work }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { memory: 128Mi }
           volumes:
             - name: key
               secret:
                 secretName: {{ $apiKeySecret | quote }}
-                # Optional so a missing Secret fails the run with a clear log
-                # line rather than a pod stuck in CreateContainerConfigError.
-                optional: true
+                # Owner root, group fsGroup: 0400 would be root-only, which the
+                # non-root refresher cannot read.
                 defaultMode: 0440
-                items:
-                  - key: api_key
-                    path: api_key
-                  - key: tenant_id
-                    path: tenant_id
             - name: script
               configMap:
                 name: workerra-vault-token-refresh
                 defaultMode: 0444
+            # In memory: the token never touches a node's disk.
             - name: work
-              emptyDir:
-                medium: Memory
-                # Also holds kubectl's discovery cache (HOME=/work).
-                sizeLimit: 16Mi
+              emptyDir: { medium: Memory, sizeLimit: 1Mi }
 {{- end }}

@@ -10,11 +10,11 @@ host: int.workerra.uk
 ownVaultStore:
   enabled: true
   tokenSecret: workerra-vault-token
-  # Refreshed every 20 minutes from the machine key in Secret
-  # int/workerra-vault-apikey, whose only policy reads workerra/int/**.
+  # Refreshed every 30 minutes from the machine key in Secret
+  # int/workerra-vault-apikey, whose only policy (workerra-read) reads
+  # workerra/int/**.
   tokenRefresh:
     enabled: true
-    expectedPolicies: [workerra-int-eso-read]
 
 vaultSecrets:
   core: workerra/int/core

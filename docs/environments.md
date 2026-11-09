@@ -196,111 +196,152 @@ redeploy the ring from Ring Promoter or `kubectl -n <ring> rollout restart deplo
 **Workerra's own tenant.** With `ownVaultStore.enabled` (on in `values-int.yaml`)
 the chart creates a namespaced `SecretStore workerra-vault` and every Workerra
 ExternalSecret reads through it instead of `wslvault-backend`. INT reads the
-`Workerra-int-tenant` tenant.
+`Workerra-int-tenant` tenant. WSLVault keeps each tenant's `kv` separate: a
+write made with a credential from another tenant succeeds and is invisible
+here, at the identical path.
 
-WSLVault is not HashiCorp Vault: ESO authenticates with a WSLVault session
-**JWT**, which lives **one hour**. A long-lived machine **API key** (`wslv_…`) is
-traded for a JWT at `POST /v1/auth/api-key`. With
-`ownVaultStore.tokenRefresh.enabled` (on in `values-int.yaml`) the chart runs
-CronJob `workerra-vault-token-refresh` every 20 minutes, which makes that trade
-and patches the JWT into `workerra-vault-token`. It is modelled on
-`wslvpn/wslvault-token-refresh` and changes nothing outside the ring namespace.
+**Token refresh.** External Secrets can only use a pre-issued WSLVault JWT
+(WSLVault has no approle/kubernetes login), and an API key yields a JWT that
+lasts one hour. So, exactly like the shared refresher
+(`wslvpn/deploy/environments/k3s1/wslvault-store.yaml`), CronJob
+`workerra-vault-token-refresh` (`ownVaultStore.tokenRefresh`, on in
+`values-int.yaml`) trades a machine API key for a fresh token every 30 minutes
+and patches it into `workerra-vault-token`. It uses the same image, RBAC (get and
+patch on that one Secret), pod security, Job retries and checks as the shared
+refresher. The differences:
 
-Each run, before writing anything, the refresher checks that the key:
+- Workerra's names.
+- The expected tenant id is read from the API key Secret (`tenant_id`),
+  because this public repo carries no tenant ids.
 
-- belongs to the tenant named in the API key Secret;
-- carries exactly `tokenRefresh.expectedPolicies`, and no `root`, `admin` or
-  `wslvault:platform-admin`;
-- returns a JWT that `lookup-self` (the call ESO validates with) accepts in
-  that tenant.
+If the refresh stops, the store fails within the hour, but the Secrets it
+already synced are kept, so running pods are unaffected.
 
-It retries network errors, 408/425/429 and 5xx with backoff, and treats
-anything else as final. The token and its expiry annotations
-(`workerra.uk/token-refreshed-at`, `workerra.uk/token-expires-at`) land in one
-merge patch. The key and JWT are never logged. RBAC is a Role that can only
-`get`/`patch` the one token Secret (`kubectl patch` GETs the object before
-patching it, so `get` is required). The image is pinned by digest
-(`tokenRefresh.image.digest`, required). `scripts/test-vault-token-refresh.sh`
-tests the script and the rendered chart; CI runs it.
+| What | Value |
+|---|---|
+| Vault path (KV v2 mount `kv`) | `workerra/int/core` → `GET /v1/kv/data/workerra/int/core` |
+| Policy resource WSLVault checks | `secret/data/workerra/int/core` (action `read`) |
+| Machine key policy | `workerra-read`: `{"paths":["secret/data/workerra/int/**"],"capabilities":["read"]}` |
+| API key Secret | `int/workerra-vault-apikey`: `api_key`, `tenant_id` |
+| Token Secret | `int/workerra-vault-token`: `token` |
+
+**Keys at `workerra/int/core`** (the pod loads them with `envFrom`; see `src/shared/config/env.ts`):
+
+| Key | INT | Notes |
+|---|---|---|
+| `SESSION_SECRET` | required | At least 32 characters; recruiter sign-in. `deploy/vault-seed.sh` generates one if missing and never replaces a valid one. |
+| `CONTACT_EMAIL` | required | One email address. Anything else makes the app's config check throw. |
+| `NEBULA_API_KEY` | only if INT's NebulaDB sets `NEBULA_API_KEYS` | Not set today. |
+| `OPSAPI_API_KEY` | only once OpsAPI is on for INT | Set by the OpsAPI setup, not now. |
+
+Everything else is not a Vault key:
+
+- `APP_ENV`, `APP_VERSION`, `SITE_URL`, `PORT`, and `OPSAPI_URL`/`OPSAPI_NAMESPACE` come from the chart.
+- `NEBULA_URL` and `LOG_LEVEL` come from `extraEnv` in `values-int.yaml`.
+- `WORKERRA_RECRUITER_*` and `OPSAPI_TEST_OTP_CODE` are local only.
+- `JOBSHOUT_API_URL` is not used yet.
 
 ### Initial setup (once per ring)
 
-The WSLVault calls need a session token for an admin of the ring's tenant
-(`ADMIN`, from your own `wslv_` key at `POST /v1/auth/api-key`) and the tenant
-id (`TENANT`, from `GET /v1/auth/token/lookup-self` → `.data.meta.tenant_id`).
-See `wslvault/docs/operations/obtaining-credentials.md`.
+Everything runs in a terminal on your Mac. `curl` talks to the WSLVault API and
+`kubectl` talks to k3s1. Nothing runs inside WSLVault. The only thing done in the
+WSLVault console is getting your admin key, if you don't already have it.
 
-1. In the tenant, write every key the ring needs (at least `SESSION_SECRET` and
-   `CONTACT_EMAIL` at `workerra/<ring>/core`, environment set to the ring).
-2. Create a read-only policy for that ring only. WSLVault authorises a KV read
-   of `kv/data/<path>` as the resource `secret/data/<path>`. Policies are scoped
-   to the tenant, and `**` matches any depth:
+0. **Sign in to the tenant** (tenant admin key, which holds the tenant's `admin`
+   policy). Use bash, and keep the same terminal for steps 1–2: the token
+   lasts an hour.
 
    ```bash
-   curl -s -X PUT https://vault.workstation.co.uk/v1/policies/workerra-int-eso-read \
-     -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
-     -d '{"name":"workerra-int-eso-read","rules":[{"paths":["secret/data/workerra/int/**"],"capabilities":["read"]}]}'
+   export KUBECONFIG=~/.kube/k3s1.yaml VAULT_ADDR=https://vault.workstation.co.uk
+   read -rs -p "Workerra-int-tenant admin key (wslv_...): " K; echo
+   R=$(jq -nc --arg k "$K" '{api_key:$k}' | curl -fsS -X POST "$VAULT_ADDR/v1/auth/api-key" \
+     -H 'Content-Type: application/json' --data-binary @-); unset K
+   echo "$R" | jq '{mfa_required, tenant_id, policies}'
+   # If mfa_required is true:
+   #   read -r -p "code: " C
+   #   R=$(echo "$R" | jq -c --arg c "$C" '{challenge, code:$c}' | curl -fsS -X POST \
+   #     "$VAULT_ADDR/v1/auth/mfa/totp" -H 'Content-Type: application/json' --data-binary @-)
+   export VAULT_TOKEN=$(echo "$R" | jq -r .token); unset R
+   TENANT=$(curl -fsS "$VAULT_ADDR/v1/auth/token/lookup-self" -H "X-Vault-Token: $VAULT_TOKEN" | jq -r .data.meta.tenant_id)
+   echo "tenant: $TENANT"   # must be Workerra-int-tenant's id
    ```
 
-3. Mint a machine key with only that policy and no MFA, straight into a
-   `0600` file. The raw key is shown once:
+1. **Write the INT keys** with the existing seed script. It merges, keeps every
+   key already there, and prints key names only:
 
    ```bash
-   curl -fsS -X POST https://vault.workstation.co.uk/v1/api-keys \
-     -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
-     -d "{\"name\":\"workerra-int-eso\",\"tenant_id\":\"$TENANT\",\"policies\":[\"workerra-int-eso-read\"]}" \
-     | (umask 077; jq -er '.id, .key' > ~/workerra-int-eso.mint)
-   sed -n 1p ~/workerra-int-eso.mint          # the key id: note it for rotation
-   (umask 077; sed -n 2p ~/workerra-int-eso.mint > ~/workerra-int-eso.key) && rm ~/workerra-int-eso.mint
+   read -r -p "CONTACT_EMAIL: " CONTACT_EMAIL; export CONTACT_EMAIL
+   deploy/vault-seed.sh int
+   curl -fsS "$VAULT_ADDR/v1/kv/data/workerra/int/core" -H "X-Vault-Token: $VAULT_TOKEN" | jq '.data.data | keys'
    ```
 
-   `-f` and `jq -e` stop a failed call from writing `null` into the key file.
-
-4. Store the key and the tenant id it must belong to, then delete the file:
+2. **Create the read-only policy** (needs the tenant's `admin` policy, which
+   step 0's key has), then read it back:
 
    ```bash
-   kubectl -n int create secret generic workerra-vault-apikey \
-     --from-file=api_key="$HOME/workerra-int-eso.key" --from-literal=tenant_id="$TENANT"
-   rm ~/workerra-int-eso.key
+   curl -fsS -X PUT "$VAULT_ADDR/v1/policies/workerra-read" \
+     -H "Authorization: Bearer $VAULT_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"name":"workerra-read","rules":[{"paths":["secret/data/workerra/int/**"],"capabilities":["read"]}]}'
+   curl -fsS "$VAULT_ADDR/v1/policies/workerra-read" -H "Authorization: Bearer $VAULT_TOKEN" | jq .
+   unset VAULT_TOKEN
    ```
 
-5. `workerra-vault-token` must already exist, because the Role can patch it but
-   not create it. If it doesn't, create it with a placeholder:
-   `kubectl -n int create secret generic workerra-vault-token --from-literal=token=pending`.
-6. Deploy, then run the refresher once instead of waiting up to 20 minutes, and
-   check the store:
+3. **Make sure the token Secret exists.** The refresher can only patch it. It
+   exists on INT already; this creates it, empty, only if it is missing:
 
    ```bash
-   kubectl -n int create job --from=cronjob/workerra-vault-token-refresh workerra-vault-token-refresh-now
-   kubectl -n int logs -f job/workerra-vault-token-refresh-now
-   kubectl -n int get secretstore workerra-vault        # Ready=True
-   kubectl -n int get externalsecret workerra-core      # SecretSynced
-   kubectl -n int delete job workerra-vault-token-refresh-now
+   kubectl -n int get secret workerra-vault-token >/dev/null 2>&1 \
+     || kubectl -n int create secret generic workerra-vault-token --from-literal=token=
    ```
+
+4. **Mint the machine key and store it** with `deploy/wslvault-refresher-key.sh`
+   (Workerra's copy of wslvpn's script). WSLVault creates a key in the tenant of
+   whoever signs in, and a tenant's own `admin` policy cannot mint keys at all,
+   so this needs the **bootstrap admin token** (`X-Admin-Token`), as for wslvpn.
+   The script:
+   - mints `workerra-read`, without MFA, in `$TENANT`;
+   - signs in with the new key and checks its tenant, policies and MFA before
+     storing anything;
+   - stores it as `int/workerra-vault-apikey` (`api_key`, `tenant_id`) without
+     printing it.
+
+   ```bash
+   WSLVAULT_ADMIN_CREDENTIAL=$(kubectl -n wslvault get secret wslvault-mesh-keys -o jsonpath='{.data.admin-token}' | base64 -d) \
+     TENANT="$TENANT" bash deploy/wslvault-refresher-key.sh
+   ```
+
+5. **Check, without printing values:**
+
+   ```bash
+   kubectl -n int get secret workerra-vault-apikey -o json | jq '.data | keys'   # ["api_key","tenant_id"]
+   kubectl -n int get secret workerra-vault-token -o json | jq '.data | keys'    # ["token"]
+   ```
+
+6. After the chart with the refresher is deployed, run it once and check the store:
+
+   ```bash
+   kubectl -n int create job --from=cronjob/workerra-vault-token-refresh workerra-vault-token-refresh-first
+   kubectl -n int logs -f job/workerra-vault-token-refresh-first   # "refreshed workerra vault session for tenant …"
+   kubectl -n int get secretstore workerra-vault                    # Ready
+   kubectl -n int get externalsecret workerra-core                  # SecretSynced
+   kubectl -n int delete job workerra-vault-token-refresh-first
+   ```
+
+   `workerra-core` is not new, so Reloader rolls the pods when its keys change.
 
 ### Recovery
 
-- **Store unready, or `token-expires-at` in the past:** read the last run's log
-  (`kubectl -n int logs job/<latest workerra-vault-token-refresh-…>`), fix the
-  cause, then run step 6.
-- **`api-key exchange refused: HTTP 404 key_not_found`:** the key was revoked,
-  or identity-service lost it (keys are per region). Mint a new one (step 3) and
-  replace the Secret:
-  `kubectl -n int create secret generic workerra-vault-apikey --from-file=api_key=… --from-literal=tenant_id="$TENANT" --dry-run=client -o yaml | kubectl replace -f -`.
-  Use `replace`, never `apply`: client-side `apply` copies the whole Secret,
-  key included, into the `last-applied-configuration` annotation, which
-  `kubectl describe` prints in clear.
-- **`policies are […], expected […]`, `administrative policy`, `requires MFA`
-  or `belongs to tenant`:** the key is not the read-only machine key for this
-  ring. Mint a correct one; never widen `expectedPolicies` to match a broader key.
-- **Rotate the key:** `POST /v1/api-keys/<id>/rotate`, replace the Secret as
-  above, run step 6, then revoke anything that was exposed.
-- **Pause:** `--set ownVaultStore.tokenRefresh.suspend=true` (or
-  `kubectl -n int patch cronjob workerra-vault-token-refresh -p '{"spec":{"suspend":true}}'`
-  until the next deploy).
-
-If the store can't authenticate, the ExternalSecrets go unready but the existing
-`workerra-<name>` Secrets are kept (deletionPolicy Retain), so the pods keep running.
+- **Store not Ready:** read the last run (`kubectl -n int logs job/<latest
+  workerra-vault-token-refresh-…>`), fix the cause, then run step 6.
+- **`api-key exchange failed: HTTP 404 key_not_found`:** the key was revoked
+  or lost. Delete `int/workerra-vault-apikey`, revoke the old key
+  (`DELETE /v1/api-keys/<id>`, with the bootstrap token) and run step 4 again.
+  The script refuses to overwrite an existing Secret.
+- **`key is in tenant …`, `requires MFA`:** the stored key is not this ring's
+  machine key. Replace it as above.
+- **Pause:** `kubectl -n int patch cronjob workerra-vault-token-refresh -p
+  '{"spec":{"suspend":true}}'` (until the next deploy), or set
+  `ownVaultStore.tokenRefresh.suspend=true`.
 
 PROD secrets go in a **separate prod-only WSL Vault tenant**: the project tenant
 kind accepts INT/TEST/ACC only (`wslvault/docs/operations/secret-tags-and-environments.md`).

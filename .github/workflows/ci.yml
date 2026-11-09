@@ -50,8 +50,10 @@ jobs:
             done
           done
       - name: Shellcheck the Vault token refresher
-        run: shellcheck -s sh deploy/helm/workerra/files/vault-token-refresh.sh scripts/test-vault-token-refresh.sh
-      - name: Test the Vault token refresher (offline, stubbed curl/kubectl)
+        run: |
+          shellcheck -s sh deploy/helm/workerra/files/vault-token-refresh.sh scripts/test-vault-token-refresh.sh
+          shellcheck deploy/wslvault-refresher-key.sh deploy/vault-seed.sh
+      - name: Test the Vault token refresher and key script (offline, stubbed curl/kubectl)
         run: sh scripts/test-vault-token-refresh.sh
       - name: Dockerfile.opsapi copies the plugin
         run: |

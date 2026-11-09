@@ -38,30 +38,21 @@ ownVaultStore:
   enabled: false
   server: https://vault.workstation.co.uk
   tokenSecret: workerra-vault-token
-  # WSLVault session JWTs last one hour, so a hand-pasted token goes stale.
-  # tokenRefresh adds a CronJob (templates/vault-token-refresh.yaml) that trades
-  # the long-lived machine API key in Secret <apiKeySecret> (keys `api_key` and
-  # `tenant_id`, created by hand) for a fresh JWT and patches it into
-  # <tokenSecret>. It refuses a key from another tenant or with policies other
-  # than expectedPolicies. Setup and recovery: docs/environments.md, "Secrets".
+  # WSLVault session JWTs last one hour, so tokenRefresh adds the shared
+  # refresher CronJob (templates/vault-token-refresh.yaml, same as
+  # wslvpn/wslvault-token-refresh): every 30 minutes it trades the machine API
+  # key in Secret <apiKeySecret> (keys `api_key` and `tenant_id`, created by
+  # deploy/wslvault-refresher-key.sh) for a fresh token and patches it into
+  # <tokenSecret>. Setup and recovery: docs/environments.md, "Secrets".
   tokenRefresh:
     enabled: false
     apiKeySecret: workerra-vault-apikey
-    # Policy names the API key must carry, exactly.
-    expectedPolicies: []
-    # Three runs per one-hour token: one run can fail and the token still has
-    # ~40 minutes left, so ESO keeps working through a single bad run.
-    schedule: "*/20 * * * *"
+    schedule: "*/30 * * * *"
     suspend: false
-    maxAttempts: 5
+    # The image the shared refresher runs.
     image:
       repository: alpine/k8s
       tag: 1.30.2
-      # Required: the job holds the API key, so it runs only by digest. This is
-      # the multi-arch index for alpine/k8s:1.30.2 (Docker Hub registry, Hub
-      # API and the image wslvpn/wslvault-token-refresh runs all agree). To
-      # change it: docker buildx imagetools inspect alpine/k8s:<tag>.
-      digest: sha256:cd560fce90f76d2da46bce0624b65258c45ab3350f7073d6722fa74c7b3a3601
 vaultSecrets:
   # NEBULA_API_KEY, OPSAPI_URL, OPSAPI_NAMESPACE, OPSAPI_API_KEY, SESSION_SECRET, ...
   core: workerra/int/core

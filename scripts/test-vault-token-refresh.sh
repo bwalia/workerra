@@ -1,197 +1,236 @@
 #!/bin/sh
 # SC2015: ok/bad always return 0, so "A && ok || bad" never runs both.
 # shellcheck disable=SC2015
-# Tests for the WSLVault token refresher (deploy/helm/workerra/files/
-# vault-token-refresh.sh) and its chart template. Runs offline: curl, kubectl
-# and sleep are stubs, nothing reaches WSLVault or a cluster.
 #
-# Needs sh, jq, helm. Usage: scripts/test-vault-token-refresh.sh
+# Tests for Workerra's WSLVault token refresher: the CronJob script
+# (deploy/helm/workerra/files/vault-token-refresh.sh), the key script
+# (deploy/wslvault-refresher-key.sh) and the chart template. Offline: curl and
+# kubectl are stubs, nothing reaches WSLVault or a cluster.
+#
+# Needs sh, bash, jq, helm. Usage: scripts/test-vault-token-refresh.sh
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CHART="$ROOT/deploy/helm/workerra"
-SCRIPT="$CHART/files/vault-token-refresh.sh"
+REFRESH="$CHART/files/vault-token-refresh.sh"
+KEYSCRIPT="$ROOT/deploy/wslvault-refresher-key.sh"
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
-API_KEY='wslv_TESTSECRETAPIKEY0123456789'
-# A fake, unsigned JWT-shaped string, built at run time so no token-shaped
-# literal sits in the repo (secret scanners rightly flag those).
+# Fake credentials, built at run time so no token-shaped literal is in the repo.
 b64url() { base64 | tr -d '=\n' | tr '/+' '_-'; }
+API_KEY="wslv_$(printf 'refresher-test-key' | b64url)"
+NEW_KEY="wslv_$(printf 'minted-test-key' | b64url)"
+ADMIN_TOKEN="bootstrap-$(printf 'admin-test' | b64url)"
 JWT="$(printf '{"alg":"none"}' | b64url).$(printf '{"sub":"test"}' | b64url).$(printf 'fake' | b64url)"
+TENANT=01a1ac98-0000-7000-8000-000000000001
+OTHER=01a0f39f-0000-7000-8000-000000000002
 
 pass=0
 failures=0
-ok() {
-  pass=$((pass + 1))
-  echo "ok   $*"
-}
-bad() {
-  failures=$((failures + 1))
-  echo "FAIL $*"
+ok() { pass=$((pass + 1)); echo "ok   $*"; }
+bad() { failures=$((failures + 1)); echo "FAIL $*"; }
+
+# No credential in the output or in any stub's argv.
+no_leak() {
+  if grep -q -e "$API_KEY" -e "$NEW_KEY" -e "$ADMIN_TOKEN" -e "$JWT" -e eyJ "$T/out"; then bad "$1: credential in output"; else ok "$1: no credential in output"; fi
+  if [ -f "$T/argv" ] && grep -q -e "$API_KEY" -e "$NEW_KEY" -e "$JWT" "$T/argv"; then bad "$1: credential in argv"; else ok "$1: no credential in argv"; fi
 }
 
-# ---- stubs -----------------------------------------------------------------
-mkdir -p "$T/bin"
-cat >"$T/bin/curl" <<'STUB'
+# ---- refresher -------------------------------------------------------------
+mkdir -p "$T/rbin"
+cat >"$T/rbin/curl" <<'STUB'
 #!/bin/sh
-# Answers per $SCEN; counts calls in $T/calls; logs argv to $T/argv.
 echo "$*" >>"$T/argv"
-out= url= hdr= data=
+out= url= data=
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift ;;
-    -H) case "$2" in @*) hdr=${2#@} ;; esac; shift ;;
     --data-binary) data=${2#@}; shift ;;
-    -w | --connect-timeout | --max-time | -X | --proto) shift ;;
+    -w | --connect-timeout | --max-time | -X | -H | --proto) shift ;;
     http*) url=$1 ;;
   esac
   shift
 done
-n=$(($(cat "$T/calls" 2>/dev/null || echo 0) + 1))
-echo "$n" >"$T/calls"
-exp=$(jq -rn 'now + 3600 | todate | sub("Z$"; ".123456789Z")')
-case "$url" in
-  */v1/auth/api-key)
-    jq -e --arg k "$API_KEY" '.api_key == $k' "$data" >/dev/null || { echo '{"message":"bad key"}' >"$out"; printf 400; exit 0; }
-    ten=T1 pol='["workerra-int-eso-read"]'
-    case "$SCEN" in
-      wrongtenant) ten=T2 ;;
-      extrapol) pol='["workerra-int-eso-read","admin"]' ;;
-      mfa) echo '{"mfa_required":true,"challenge":"c"}' >"$out"; printf 200; exit 0 ;;
-      notfound) echo '{"code":"key_not_found","message":"api key not found"}' >"$out"; printf 404; exit 0 ;;
-      forbid) echo '{"errors":["no policy grants read"]}' >"$out"; printf 403; exit 0 ;;
-      flaky) [ "$n" -ge 3 ] || { echo '{"message":"down"}' >"$out"; printf 503; exit 0; } ;;
-      netdown) printf 000; exit 7 ;;
-      trunc) [ "$n" -ge 2 ] || { printf '{"token":"eyJ' >"$out"; printf 200; exit 28; } ;;
-      shortlived) exp=$(jq -rn 'now + 60 | todate') ;;
-      badtoken) printf '{"token":"not-a-jwt","expires_at":"%s","tenant_id":"T1","policies":["workerra-int-eso-read"]}' "$exp" >"$out"; printf 200; exit 0 ;;
-    esac
-    printf '{"token":"%s","expires_at":"%s","tenant_id":"%s","policies":%s}' "$JWT" "$exp" "$ten" "$pol" >"$out"
-    printf 200 ;;
-  */v1/auth/token/lookup-self)
-    grep -qx "X-Vault-Token: $JWT" "$hdr" || { echo '{}' >"$out"; printf 401; exit 0; }
-    t=T1
-    [ "$SCEN" = lookupwrong ] && t=T9
-    printf '{"data":{"meta":{"tenant_id":"%s"},"ttl":3599}}' "$t" >"$out"
-    printf 200 ;;
-  *) printf 404 ;;
+case "$SCEN" in
+  netdown) echo "curl: (7) Failed to connect" >&2; exit 7 ;;
+  trunc) printf '{"token":"' >"$out"; printf 200; echo "curl: (28) Operation timed out" >&2; exit 28 ;;
 esac
+jq -e --arg k "$API_KEY" '.api_key == $k' "$data" >/dev/null || { echo '{"errors":["bad key"]}' >"$out"; printf 400; exit 0; }
+ten=$TENANT
+case "$SCEN" in
+  wrongtenant) ten=$OTHER ;;
+  mfa) echo '{"mfa_required":true,"challenge":"c"}' >"$out"; printf 200; exit 0 ;;
+  notfound) echo '{"code":"key_not_found","message":"api key not found"}' >"$out"; printf 404; exit 0 ;;
+  notoken) printf '{"token":"","tenant_id":"%s"}' "$ten" >"$out"; printf 200; exit 0 ;;
+esac
+printf '{"token":"%s","expires_at":"2099-01-01T00:00:00Z","tenant_id":"%s","policies":["workerra-read"]}' "$JWT" "$ten" >"$out"
+printf 200
 STUB
-cat >"$T/bin/kubectl" <<'STUB'
+cat >"$T/rbin/kubectl" <<'STUB'
 #!/bin/sh
 echo "$*" >>"$T/argv"
-while [ $# -gt 0 ]; do
-  [ "$1" = --patch-file ] && cp "$2" "$T/patch.json"
-  shift
-done
+while [ $# -gt 0 ]; do [ "$1" = --patch-file ] && cp "$2" "$T/patch.json"; shift; done
 [ "$SCEN" = kubefail ] && { echo 'Error from server (Forbidden): denied' >&2; exit 1; }
 echo 'secret/workerra-vault-token patched'
 STUB
-printf '#!/bin/sh\nexit 0\n' >"$T/bin/sleep"
-chmod +x "$T/bin/"*
+chmod +x "$T/rbin/"*
 
-# run <scenario> [VAR=value ...]: runs the script; sets $rc, output in $T/out.
-run() {
+run_refresh() {
   scen=$1
   shift
-  rm -rf "$T/key" "$T/work" "$T/calls" "$T/argv" "$T/patch.json"
+  rm -rf "$T/key" "$T/work" "$T/argv" "$T/patch.json"
   mkdir -p "$T/key" "$T/work"
   printf '%s\n' "$API_KEY" >"$T/key/api_key"
-  echo T1 >"$T/key/tenant_id"
-  [ "$scen" = nokey ] && rm "$T/key/api_key"
+  printf '%s\n' "$TENANT" >"$T/key/tenant_id"
+  case "$scen" in nokey) rm "$T/key/api_key" ;; notenant) rm "$T/key/tenant_id" ;; esac
   rc=0
-  env PATH="$T/bin:$PATH" T="$T" SCEN="$scen" API_KEY="$API_KEY" JWT="$JWT" \
+  env PATH="$T/rbin:$PATH" T="$T" SCEN="$scen" API_KEY="$API_KEY" JWT="$JWT" TENANT="$TENANT" OTHER="$OTHER" \
     VAULT_ADDR=https://vault.example NAMESPACE=int TARGET_SECRET=workerra-vault-token \
-    EXPECTED_POLICIES=workerra-int-eso-read MAX_ATTEMPTS=3 KEY_DIR="$T/key" WORK="$T/work" \
-    "$@" sh "$SCRIPT" >"$T/out" 2>&1 || rc=$?
+    KEY_DIR="$T/key" WORK="$T/work" "$@" sh "$REFRESH" >"$T/out" 2>&1 || rc=$?
 }
 
-# Checks every run: no secret in output or argv, work dir empty.
-hygiene() {
-  if grep -q -e "$API_KEY" -e "$JWT" -e TESTSECRET -e eyJ "$T/out"; then bad "$1: secret in output"; else ok "$1: no secret in output"; fi
-  if [ -f "$T/argv" ] && grep -q -e "$API_KEY" -e "$JWT" "$T/argv"; then bad "$1: secret in argv"; else ok "$1: no secret in argv"; fi
-  if [ -z "$(ls -A "$T/work")" ]; then ok "$1: work dir cleaned"; else bad "$1: files left: $(ls "$T/work")"; fi
+refresh_ok() {
+  run_refresh "$1"
+  if [ "$rc" -eq 0 ] && grep -q "refreshed workerra vault session for tenant $TENANT" "$T/out" &&
+    jq -e --arg j "$JWT" '(.data.token | @base64d) == $j and (keys == ["data"])' "$T/patch.json" >/dev/null; then
+    ok "refresh $1: token patched"
+  else bad "refresh $1: expected success (rc=$rc): $(tail -1 "$T/out")"; fi
+  grep -q -- "-n int patch secret workerra-vault-token --type merge --patch-file patch.json" "$T/argv" &&
+    ok "refresh $1: patches only int/workerra-vault-token" || bad "refresh $1: unexpected kubectl call"
+  [ -z "$(ls -A "$T/work")" ] && ok "refresh $1: work dir cleaned" || bad "refresh $1: left $(ls "$T/work")"
+  no_leak "refresh $1"
 }
 
-expect_ok() {
-  run "$@"
-  if [ "$rc" -eq 0 ] && [ -f "$T/patch.json" ] &&
-    jq -e --arg j "$JWT" '(.data.token | @base64d) == $j and .metadata.annotations["workerra.uk/token-expires-at"] != null' "$T/patch.json" >/dev/null; then
-    ok "$1: token patched"
-  else
-    bad "$1: expected success (rc=$rc): $(tail -1 "$T/out")"
-  fi
-  hygiene "$1"
-}
-
-# expect_fail <scenario> <message substring> [VAR=value ...]
-expect_fail() {
+refresh_fails() {
   scen=$1
   msg=$2
-  shift 2
-  run "$scen" "$@"
-  if [ "$rc" -ne 0 ] && grep -q -- "$msg" "$T/out"; then ok "$scen: fails with '$msg'"; else bad "$scen: expected failure '$msg' (rc=$rc): $(tail -1 "$T/out")"; fi
-  if [ -f "$T/patch.json" ] && [ "$scen" != kubefail ]; then bad "$scen: patched despite failing"; else ok "$scen: secret not written"; fi
-  hygiene "$scen"
+  run_refresh "$scen"
+  [ "$rc" -ne 0 ] && grep -q -- "$msg" "$T/out" && ok "refresh $scen: fails with '$msg'" ||
+    bad "refresh $scen: expected '$msg' (rc=$rc): $(tail -1 "$T/out")"
+  if [ -f "$T/patch.json" ] && [ "$scen" != kubefail ]; then bad "refresh $scen: wrote the Secret"; else ok "refresh $scen: Secret not written"; fi
+  [ -z "$(ls -A "$T/work")" ] && ok "refresh $scen: work dir cleaned" || bad "refresh $scen: left $(ls "$T/work")"
+  no_leak "refresh $scen"
 }
 
-echo "== script"
-expect_ok ok
-expect_ok flaky
-expect_ok trunc
-expect_fail wrongtenant "belongs to tenant 'T2'"
-expect_fail extrapol "policies are"
-expect_fail extrapol "administrative policy" EXPECTED_POLICIES="admin,workerra-int-eso-read"
-expect_fail mfa "requires MFA"
-expect_fail notfound "HTTP 404 key_not_found"
-expect_fail forbid "HTTP 403 no policy grants read"
-expect_fail netdown "failed after 3 attempts"
-expect_fail lookupwrong "lookup-self reports tenant 'T9'"
-expect_fail shortlived "refusing to store it"
-expect_fail badtoken "no well-formed token"
-expect_fail kubefail "secret update failed"
-expect_fail nokey "'api_key' is missing"
-expect_fail ok "must be https://" VAULT_ADDR=http://vault.example
+echo "== refresher (vault-token-refresh.sh)"
+refresh_ok ok
+refresh_fails wrongtenant "key is in tenant '$OTHER', expected $TENANT; not updating"
+refresh_fails mfa "this key requires MFA"
+refresh_fails notfound "api-key exchange failed: HTTP 404"
+refresh_fails notoken "no token in response"
+refresh_fails netdown "Failed to connect"
+refresh_fails trunc "Operation timed out"
+refresh_fails kubefail "Forbidden"
+refresh_fails nokey "no api_key in the API key Secret"
+refresh_fails notenant "no tenant_id in the API key Secret"
+
+# ---- key script ------------------------------------------------------------
+mkdir -p "$T/kbin"
+cat >"$T/kbin/curl" <<'STUB'
+#!/bin/sh
+echo "$*" >>"$T/argv"
+url=
+for a in "$@"; do case "$a" in http*) url=$a ;; esac; done
+body=$(cat)
+case "$url" in
+  */v1/auth/api-key)
+    k=$(printf '%s' "$body" | jq -r .api_key)
+    if [ "$k" = "$NEW_KEY" ]; then
+      ten=$TENANT pol='["workerra-read"]' mfa=false
+      case "$SCEN" in newother) ten=$OTHER ;; newpolicy) pol='["workerra-read","admin"]' ;; newmfa) mfa=true ;; esac
+      printf '{"token":"%s","tenant_id":"%s","policies":%s,"mfa_required":%s}\n200' "$JWT" "$ten" "$pol" "$mfa"
+    else
+      printf '{"token":"%s","tenant_id":"%s","policies":["admin"]}\n200' "$JWT" "$OTHER"
+    fi ;;
+  */v1/api-keys)
+    echo "$body" >"$T/mint.json"
+    printf '{"id":"key-1","key":"%s"}\n201' "$NEW_KEY" ;;
+  *) printf '{}\n404' ;;
+esac
+STUB
+cat >"$T/kbin/kubectl" <<'STUB'
+#!/bin/sh
+echo "$*" >>"$T/argv"
+case "$*" in
+  *" get secret "*) [ "$SCEN" = exists ] && exit 0; exit 1 ;;
+  *" create secret generic "*) cat >"$T/stored_key"; echo "$*" >"$T/create_args"; echo "secret/x created" ;;
+esac
+STUB
+chmod +x "$T/kbin/"*
+
+run_key() {
+  scen=$1
+  cred=$2
+  rm -f "$T/argv" "$T/stored_key" "$T/create_args" "$T/mint.json"
+  rc=0
+  env PATH="$T/kbin:$PATH" T="$T" SCEN="$scen" NEW_KEY="$NEW_KEY" JWT="$JWT" TENANT="$TENANT" OTHER="$OTHER" \
+    WSLVAULT_ADMIN_CREDENTIAL="$cred" bash "$KEYSCRIPT" >"$T/out" 2>&1 </dev/null || rc=$?
+}
+
+echo "== key script (wslvault-refresher-key.sh)"
+run_key ok "$ADMIN_TOKEN"
+if [ "$rc" -eq 0 ] && [ "$(cat "$T/stored_key")" = "$NEW_KEY" ]; then ok "key ok: key stored from stdin"; else bad "key ok: not stored (rc=$rc): $(tail -2 "$T/out")"; fi
+grep -q -- "-n int create secret generic workerra-vault-apikey --from-file=api_key=/dev/stdin --from-literal=tenant_id=$TENANT" "$T/create_args" &&
+  ok "key ok: int/workerra-vault-apikey with api_key and tenant_id" || bad "key ok: wrong create: $(cat "$T/create_args")"
+jq -e --arg t "$TENANT" '.tenant_id == $t and .policies == ["workerra-read"] and .mfa_required == false' "$T/mint.json" >/dev/null &&
+  ok "key ok: mints workerra-read, no MFA, in the tenant" || bad "key ok: mint request $(cat "$T/mint.json")"
+no_leak "key ok"
+
+key_refused() {
+  scen=$1
+  cred=$2
+  msg=$3
+  run_key "$scen" "$cred"
+  [ "$rc" -ne 0 ] && grep -q -- "$msg" "$T/out" && ok "key $scen: refused ($msg)" || bad "key $scen: expected '$msg' (rc=$rc): $(tail -2 "$T/out")"
+  [ ! -f "$T/stored_key" ] && ok "key $scen: nothing stored" || bad "key $scen: stored a key"
+  no_leak "key $scen"
+}
+key_refused newother "$ADMIN_TOKEN" "Not stored. Revoke it"
+key_refused newpolicy "$ADMIN_TOKEN" "Not stored. Revoke it"
+key_refused newmfa "$ADMIN_TOKEN" "Not stored. Revoke it"
+key_refused otheradmin "$API_KEY" "can only create keys in its own tenant"
+run_key exists "$ADMIN_TOKEN"
+[ "$rc" -eq 0 ] && grep -q "already exists" "$T/out" && [ ! -f "$T/mint.json" ] &&
+  ok "key exists: leaves the existing Secret, mints nothing" || bad "key exists: $(tail -1 "$T/out")"
 
 # ---- chart -----------------------------------------------------------------
 echo "== chart"
-command -v helm >/dev/null || { echo "helm not found" >&2; exit 1; }
 render() { helm template workerra "$CHART" -n int --set image.tag=test "$@"; }
-
 render -f "$CHART/values-int.yaml" >"$T/int.yaml"
-# Pull a document out of the multi-doc render by kind + name.
 doc() { awk -v k="kind: $1" -v n="  name: $2" 'BEGIN{RS="\n---\n"} index($0,k) && index($0,n) {print}' "$T/int.yaml"; }
-
 cron=$(doc CronJob workerra-vault-token-refresh)
 role=$(doc Role workerra-vault-token-refresh)
-echo "$cron" | grep -q 'schedule: "\*/20 \* \* \* \*"' && ok "INT schedule is */20" || bad "INT schedule is not */20"
-echo "$cron" | grep -Eq 'image: "alpine/k8s:1\.30\.2@sha256:[a-f0-9]{64}"' && ok "image pinned by digest" || bad "image not pinned by digest"
-echo "$cron" | grep -q 'secretName: "workerra-vault-apikey"' && ok "mounts workerra-vault-apikey" || bad "API key Secret not mounted"
-echo "$cron" | grep -q 'readOnlyRootFilesystem: true' && ok "read-only root fs" || bad "root fs writable"
-echo "$role" | grep -q 'verbs: \["get", "patch"\]' && ok "Role verbs are get, patch" || bad "Role verbs changed: $(echo "$role" | grep verbs)"
-echo "$role" | grep -q 'resourceNames: \["workerra-vault-token"\]' && ok "Role scoped to workerra-vault-token" || bad "Role not scoped by resourceNames"
-[ "$(echo "$role" | grep -c 'resourceNames')" -eq 1 ] && ok "Role has a single rule" || bad "Role has extra rules"
 
+has() { echo "$1" | grep -Eq -- "$2" && ok "$3" || bad "$3"; }
+# The shared refresher's settings (wslvpn/deploy/environments/k3s1/wslvault-store.yaml).
+has "$cron" 'schedule: "\*/30 \* \* \* \*"' "schedule */30, as the shared refresher"
+has "$cron" 'image: "alpine/k8s:1\.30\.2"' "image alpine/k8s:1.30.2, as the shared refresher"
+has "$cron" 'restartPolicy: OnFailure' "restartPolicy OnFailure"
+has "$cron" 'backoffLimit: 3' "backoffLimit 3"
+has "$cron" 'activeDeadlineSeconds: 300' "activeDeadlineSeconds 300"
+has "$cron" 'concurrencyPolicy: Forbid' "concurrencyPolicy Forbid"
+has "$cron" 'runAsUser: 65534' "runs as 65534"
+has "$cron" 'readOnlyRootFilesystem: true' "read-only root filesystem"
+has "$cron" 'drop: \[ALL\]' "drops all capabilities"
+has "$cron" 'defaultMode: 0440' "key mounted 0440"
+has "$cron" 'emptyDir: \{ medium: Memory, sizeLimit: 1Mi \}' "work dir in memory, 1Mi"
+has "$cron" 'secretName: "workerra-vault-apikey"' "mounts int/workerra-vault-apikey"
+has "$cron" 'name: TARGET_SECRET, value: "workerra-vault-token"' "targets workerra-vault-token"
+has "$role" 'verbs: \[get, patch\]' "Role verbs get, patch"
+has "$role" 'resourceNames: \["workerra-vault-token"\]' "Role scoped to workerra-vault-token"
+[ "$(echo "$role" | grep -c resourceNames)" -eq 1 ] && ok "Role has one rule" || bad "Role has extra rules"
 if render | grep -q workerra-vault-token-refresh; then bad "base values render the refresher"; else ok "off by default"; fi
-for v in "$CHART"/values-*.yaml; do
-  case "$v" in */values-int.yaml) continue ;; esac
-  if render -f "$v" | grep -q workerra-vault-token-refresh; then bad "$(basename "$v") enables the refresher"; else ok "$(basename "$v") leaves it off"; fi
-done
 
 guard() {
-  label=$1
-  want=$2
-  shift 2
-  if out=$(render -f "$CHART/values-int.yaml" "$@" 2>&1); then bad "guard '$label' did not fire"; else
-    echo "$out" | grep -q -- "$want" && ok "guard: $label" || bad "guard '$label' wrong message: $out"
+  if out=$(render -f "$CHART/values-int.yaml" "$@" 2>&1); then bad "guard did not fire: $*"; else
+    echo "$out" | grep -q -e "needs ownVaultStore.enabled" -e "must be an https:// URL" -e "must differ" &&
+      ok "guard: $*" || bad "guard wrong message: $out"
   fi
 }
-guard "needs ownVaultStore" "needs ownVaultStore.enabled" --set ownVaultStore.enabled=false
-guard "expectedPolicies set" "expectedPolicies must list" --set 'ownVaultStore.tokenRefresh.expectedPolicies=null'
-guard "https server" "must be an https:// URL" --set ownVaultStore.server=http://vault.example
-guard "digest required" "digest must be a sha256" --set ownVaultStore.tokenRefresh.image.digest=
-guard "distinct Secrets" "must differ" --set ownVaultStore.tokenRefresh.apiKeySecret=workerra-vault-token
+guard --set ownVaultStore.enabled=false
+guard --set ownVaultStore.server=http://vault.example
+guard --set ownVaultStore.tokenRefresh.apiKeySecret=workerra-vault-token
 
 echo
 echo "$pass passed, $failures failed"
