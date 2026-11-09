@@ -15,7 +15,10 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
 API_KEY='wslv_TESTSECRETAPIKEY0123456789'
-JWT='eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJURVNUU0VDUkVUSldUIn0.c2lnVEVTVFNFQ1JFVEpXVA'
+# A fake, unsigned JWT-shaped string, built at run time so no token-shaped
+# literal sits in the repo (secret scanners rightly flag those).
+b64url() { base64 | tr -d '=\n' | tr '/+' '_-'; }
+JWT="$(printf '{"alg":"none"}' | b64url).$(printf '{"sub":"test"}' | b64url).$(printf 'fake' | b64url)"
 
 pass=0
 failures=0
@@ -106,7 +109,7 @@ run() {
 
 # Checks every run: no secret in output or argv, work dir empty.
 hygiene() {
-  if grep -q -e "$API_KEY" -e "$JWT" -e TESTSECRET "$T/out"; then bad "$1: secret in output"; else ok "$1: no secret in output"; fi
+  if grep -q -e "$API_KEY" -e "$JWT" -e TESTSECRET -e eyJ "$T/out"; then bad "$1: secret in output"; else ok "$1: no secret in output"; fi
   if [ -f "$T/argv" ] && grep -q -e "$API_KEY" -e "$JWT" "$T/argv"; then bad "$1: secret in argv"; else ok "$1: no secret in argv"; fi
   if [ -z "$(ls -A "$T/work")" ]; then ok "$1: work dir cleaned"; else bad "$1: files left: $(ls "$T/work")"; fi
 }
