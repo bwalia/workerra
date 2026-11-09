@@ -26,6 +26,13 @@ NEW_KEY="wslv_$(printf 'minted-test-key' | b64url)"
 ADMIN_TOKEN="bootstrap-$(printf 'admin-test' | b64url)"
 VAULT_TEST_TOKEN="vt-$(printf 'seed-test-token' | b64url)"
 JWT="$(printf '{"alg":"none"}' | b64url).$(printf '{"sub":"test"}' | b64url).$(printf 'fake' | b64url)"
+# Tokens for the new key's sign-in, by superuser claim (base64url, unpadded).
+fake_jwt() { printf '%s.%s.%s' "$(printf '{"alg":"none"}' | b64url)" "$(printf '%s' "$1" | b64url)" "$(printf 'fake' | b64url)"; }
+JWT_SU_ABSENT=$(fake_jwt '{"sub":"k","tenant_id":"t","policies":["workerra-read"]}')
+JWT_SU_FALSE=$(fake_jwt '{"sub":"k","tenant_id":"t","policies":["workerra-read"],"superuser":false}')
+JWT_SU_TRUE=$(fake_jwt '{"sub":"k","tenant_id":"t","policies":["workerra-read"],"superuser":true}')
+JWT_SU_STRING=$(fake_jwt '{"sub":"k","superuser":"true"}')
+JWT_SU_NULL=$(fake_jwt '{"sub":"k","superuser":null}')
 TENANT=01a1ac98-0000-7000-8000-000000000001
 OTHER=01a0f39f-0000-7000-8000-000000000002
 
@@ -144,9 +151,13 @@ case "$url" in
   */v1/auth/api-key)
     k=$(printf '%s' "$body" | jq -r .api_key)
     if [ "$k" = "$NEW_KEY" ]; then
-      ten=$TENANT pol='["workerra-read"]' mfa=false
-      case "$SCEN" in newother) ten=$OTHER ;; newpolicy) pol='["workerra-read","admin"]' ;; newmfa) mfa=true ;; esac
-      printf '{"token":"%s","tenant_id":"%s","policies":%s,"mfa_required":%s}\n200' "$JWT" "$ten" "$pol" "$mfa"
+      ten=$TENANT pol='["workerra-read"]' mfa=false tok=$JWT_SU_ABSENT
+      case "$SCEN" in
+        newother) ten=$OTHER ;; newpolicy) pol='["workerra-read","admin"]' ;; newmfa) mfa=true ;;
+        sufalse) tok=$JWT_SU_FALSE ;; newsuper) tok=$JWT_SU_TRUE ;; newsuperstring) tok=$JWT_SU_STRING ;;
+        newsupernull) tok=$JWT_SU_NULL ;; newbadjwt) tok=not-a-jwt ;; newgarbled) tok=a.%%%.c ;;
+      esac
+      printf '{"token":"%s","tenant_id":"%s","policies":%s,"mfa_required":%s}\n200' "$tok" "$ten" "$pol" "$mfa"
     else
       printf '{"token":"%s","tenant_id":"%s","policies":["admin"]}\n200' "$JWT" "$OTHER"
     fi ;;
@@ -172,6 +183,8 @@ run_key() {
   rm -f "$T/argv" "$T/headers" "$T/stored_key" "$T/create_args" "$T/mint.json"
   rc=0
   env PATH="$T/kbin:$PATH" T="$T" SCEN="$scen" NEW_KEY="$NEW_KEY" JWT="$JWT" TENANT="$TENANT" OTHER="$OTHER" \
+    JWT_SU_ABSENT="$JWT_SU_ABSENT" JWT_SU_FALSE="$JWT_SU_FALSE" JWT_SU_TRUE="$JWT_SU_TRUE" \
+    JWT_SU_STRING="$JWT_SU_STRING" JWT_SU_NULL="$JWT_SU_NULL" \
     WSLVAULT_ADMIN_CREDENTIAL="$cred" bash "$KEYSCRIPT" >"$T/out" 2>&1 </dev/null || rc=$?
 }
 
@@ -182,6 +195,7 @@ grep -q -- "-n int create secret generic workerra-vault-apikey --from-file=api_k
   ok "key ok: int/workerra-vault-apikey with api_key and tenant_id" || bad "key ok: wrong create: $(cat "$T/create_args")"
 jq -e --arg t "$TENANT" '.tenant_id == $t and .policies == ["workerra-read"] and .mfa_required == false' "$T/mint.json" >/dev/null &&
   ok "key ok: mints workerra-read, no MFA, in the tenant" || bad "key ok: mint request $(cat "$T/mint.json")"
+grep -q "superuser claim absent" "$T/out" && ok "key ok: superuser claim absent accepted" || bad "key ok: superuser absent: $(tail -1 "$T/out")"
 grep -qx "header = \"X-Admin-Token: $ADMIN_TOKEN\"" "$T/headers" &&
   ok "key ok: admin token sent as a header from a curl config" || bad "key ok: admin token header not sent"
 no_leak "key ok"
@@ -198,6 +212,19 @@ key_refused() {
 key_refused newother "$ADMIN_TOKEN" "Not stored. Revoke it"
 key_refused newpolicy "$ADMIN_TOKEN" "Not stored. Revoke it"
 key_refused newmfa "$ADMIN_TOKEN" "Not stored. Revoke it"
+key_refused newsuper "$ADMIN_TOKEN" "superuser=true"
+key_refused newsuperstring "$ADMIN_TOKEN" "superuser=invalid"
+key_refused newsupernull "$ADMIN_TOKEN" "superuser=invalid"
+key_refused newbadjwt "$ADMIN_TOKEN" "superuser=invalid"
+key_refused newgarbled "$ADMIN_TOKEN" "superuser=invalid"
+# A refusal names the key id for recovery and never the key, token or claims.
+run_key newsuper "$ADMIN_TOKEN"
+grep -q "Revoke it: DELETE .*/v1/api-keys/key-1" "$T/out" && ok "key newsuper: prints only the key id to revoke" || bad "key newsuper: no key id"
+if grep -q -e "$JWT_SU_TRUE" -e '"superuser"' -e tenant_id\" "$T/out"; then bad "key newsuper: token or claims printed"; else ok "key newsuper: no token or claims printed"; fi
+run_key sufalse "$ADMIN_TOKEN"
+[ "$rc" -eq 0 ] && [ "$(cat "$T/stored_key")" = "$NEW_KEY" ] && grep -q "superuser claim false" "$T/out" &&
+  ok "key sufalse: superuser=false accepted and stored" || bad "key sufalse (rc=$rc): $(tail -2 "$T/out")"
+no_leak "key sufalse"
 key_refused otheradmin "$API_KEY" "can only create keys in its own tenant"
 run_key exists "$ADMIN_TOKEN"
 [ "$rc" -eq 0 ] && grep -q "already exists" "$T/out" && [ ! -f "$T/mint.json" ] &&

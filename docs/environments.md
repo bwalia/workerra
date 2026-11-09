@@ -217,6 +217,35 @@ refresher. The differences:
 If the refresh stops, the store fails within the hour, but the Secrets it
 already synced are kept, so running pods are unaffected.
 
+**Who can read the machine key.** Only the refresher CronJob *uses*
+`int/workerra-vault-apikey` (mounted read-only, mode 0440; its Role can only
+`get`/`patch` `workerra-vault-token`). It is **not** exclusive to the refresher:
+`int` is a shared ring namespace, so every identity that can read or mount
+Secrets there can reach it, exactly as with every other INT Secret (`workerra-core`
+and the shared-tenant Vault token included). As reviewed on 2026-11-09
+(read-only, `kubectl auth can-i --as`):
+
+- read any `int` Secret: cluster-admin (`system:masters`, `helm-traefik`,
+  `headlamp`, `longhorn-support-bundle`), Ring Promoter's `ring-exec/ring-deploy-job`
+  and `rp-deploy-workstation-shop`, Argo CD, External Secrets, Reloader,
+  sealed-secrets, kubepilot, the postgres operator, the Traefik and wslproxy
+  ingress controllers, `intellaro-ingress`, `prod/obs-grafana`, `prod/obs-loki`,
+  `acc/spectoncr-grafana`, and JobShout's `int/jobshout-secretsrot` Role (no
+  `resourceNames`);
+- create pods or Deployments in `int`, and so mount it: cluster-admin, `headlamp`,
+  `ring-deploy-job`, Argo CD's application controller (pods and Deployments),
+  `rp-deploy-workstation-shop` and the postgres operator (Deployments).
+
+The ring = namespace convention and other applications' RBAC are left as they
+are. What limits a leaked key is the key itself: `workerra-read` only (read
+`secret/data/workerra/int/**`), Workerra's own tenant, no MFA, never superuser
+(the key script checks the new token's claims before storing it). WSLVault's
+lease endpoints don't check policy, so a leaked key could also sign out other
+sessions in Workerra-int-tenant (not other tenants). Recovery: delete
+`int/workerra-vault-apikey`, revoke the key (`DELETE /v1/api-keys/<id>` with the
+bootstrap admin token), mint a new one with the script, and rotate
+`workerra/int/*`.
+
 | What | Value |
 |---|---|
 | Vault path (KV v2 mount `kv`) | `workerra/int/core` → `GET /v1/kv/data/workerra/int/core` |
@@ -326,8 +355,10 @@ WSLVault console is getting your admin key, if you don't already have it.
    so this needs the **bootstrap admin token** (`X-Admin-Token`), as for wslvpn.
    The script:
    - mints `workerra-read`, without MFA, in `$TENANT`;
-   - signs in with the new key and checks its tenant, policies and MFA before
-     storing anything;
+   - signs in with the new key and checks its tenant, exact policies, MFA and,
+     from the new token's claims (decoded locally, never printed), that it is
+     not a superuser, before storing anything; on any mismatch it stores
+     nothing and prints only the key id to revoke;
    - stores it as `int/workerra-vault-apikey` (`api_key`, `tenant_id`) without
      printing it.
 

@@ -14,7 +14,8 @@
 # (Run it with bash. zsh's `read -p` means something else entirely.)
 #
 # The key must live in Workerra's tenant, carry only the read-only
-# `workerra-read` policy, and not require MFA — nothing is there to type a code. wslvault
+# `workerra-read` policy, not be a superuser (checked from the new token's
+# claims), and not require MFA — nothing is there to type a code. wslvault
 # decides the tenant from the credential that creates it:
 #
 #   - A signed-in key (wslv_...) mints only inside its OWN tenant, whatever the
@@ -107,14 +108,32 @@ case "$KEY" in wslv_*) ;; *) echo "::error::no key in the response" >&2; exit 1;
 C=$(post /v1/auth/api-key "$(printf '%s' "$KEY" | as_json api_key)")
 got_tenant=$(body "$C" | jq -r '.tenant_id // empty')
 got_mfa=$(body "$C" | jq -r '.mfa_required // false')
-got_policies=$(body "$C" | jq -c '.policies // []'); unset C
-if [ "$got_mfa" = true ] || [ "$got_tenant" != "$TENANT" ] || [ "$got_policies" != "[\"$POLICY\"]" ]; then
+got_policies=$(body "$C" | jq -c '.policies // []')
+# The sign-in response carries no superuser field, so read the new token's own
+# `superuser` claim. Decoded here, on stdin, and never printed: only one of
+# absent / false / true / invalid comes out. WSLVault treats a missing claim as
+# false (#[serde(default)] on TokenClaims.superuser), so absent and false pass;
+# true, any other value, or a token that doesn't decode is refused.
+got_superuser=$(body "$C" | jq -r '
+  (.token // "" | split(".")) as $p
+  | if ($p | length) != 3 then "invalid" else
+      (try ($p[1] | gsub("-"; "+") | gsub("_"; "/") | . + ("=" * ((4 - length % 4) % 4)) | @base64d | fromjson)
+       catch null) as $c
+      | if ($c | type) != "object" then "invalid"
+        elif ($c | has("superuser") | not) then "absent"
+        elif $c.superuser == false then "false"
+        elif $c.superuser == true then "true"
+        else "invalid" end
+    end' 2>/dev/null) || got_superuser=invalid
+unset C
+case "$got_superuser" in absent | false) superuser_ok=true ;; *) superuser_ok=false ;; esac
+if [ "$got_mfa" = true ] || [ "$got_tenant" != "$TENANT" ] || [ "$got_policies" != "[\"$POLICY\"]" ] || [ "$superuser_ok" != true ]; then
   unset KEY
-  echo "::error::the new key signs in to tenant ${got_tenant:-?} with $got_policies (mfa_required=$got_mfa); expected $TENANT with [\"$POLICY\"], without MFA." >&2
+  echo "::error::the new key signs in to tenant ${got_tenant:-?} with $got_policies (mfa_required=$got_mfa, superuser=${got_superuser:-invalid}); expected $TENANT with [\"$POLICY\"], without MFA, not superuser." >&2
   echo "Not stored. Revoke it: DELETE $VAULT/v1/api-keys/$ID" >&2
   exit 1
 fi
-echo "new key $ID signs in to tenant $got_tenant with $got_policies, no MFA"
+echo "new key $ID signs in to tenant $got_tenant with $got_policies, no MFA, superuser claim $got_superuser"
 
 printf %s "$KEY" | kubectl -n "$NS" create secret generic "$SECRET" \
   --from-file=api_key=/dev/stdin --from-literal=tenant_id="$TENANT"
