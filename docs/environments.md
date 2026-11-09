@@ -202,7 +202,7 @@ WSLVault is not HashiCorp Vault: ESO authenticates with a WSLVault session
 **JWT**, which lives **one hour**. A long-lived machine **API key** (`wslv_…`) is
 traded for a JWT at `POST /v1/auth/api-key`. With
 `ownVaultStore.tokenRefresh.enabled` (on in `values-int.yaml`) the chart runs
-CronJob `workerra-vault-token-refresh` every 30 minutes, which makes that trade
+CronJob `workerra-vault-token-refresh` every 20 minutes, which makes that trade
 and patches the JWT into `workerra-vault-token`. It is modelled on
 `wslvpn/wslvault-token-refresh` and changes nothing outside the ring namespace.
 
@@ -218,7 +218,10 @@ It retries network errors, 408/425/429 and 5xx with backoff, and treats
 anything else as final. The token and its expiry annotations
 (`workerra.uk/token-refreshed-at`, `workerra.uk/token-expires-at`) land in one
 merge patch. The key and JWT are never logged. RBAC is a Role that can only
-`get`/`patch` the one token Secret.
+`get`/`patch` the one token Secret (`kubectl patch` GETs the object before
+patching it, so `get` is required). The image is pinned by digest
+(`tokenRefresh.image.digest`, required). `scripts/test-vault-token-refresh.sh`
+tests the script and the rendered chart; CI runs it.
 
 ### Initial setup (once per ring)
 
@@ -264,7 +267,7 @@ See `wslvault/docs/operations/obtaining-credentials.md`.
 5. `workerra-vault-token` must already exist, because the Role can patch it but
    not create it. If it doesn't, create it with a placeholder:
    `kubectl -n int create secret generic workerra-vault-token --from-literal=token=pending`.
-6. Deploy, then run the refresher once instead of waiting up to 30 minutes, and
+6. Deploy, then run the refresher once instead of waiting up to 20 minutes, and
    check the store:
 
    ```bash

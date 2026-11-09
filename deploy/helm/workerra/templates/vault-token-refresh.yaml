@@ -16,6 +16,9 @@
 {{- if not (hasPrefix "https://" .Values.ownVaultStore.server) }}
 {{- fail "ownVaultStore.server must be an https:// URL" }}
 {{- end }}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" ($refresh.image.digest | default "")) }}
+{{- fail "ownVaultStore.tokenRefresh.image.digest must be a sha256: digest; the job holds the API key, so its image is pinned" }}
+{{- end }}
 {{- $tokenSecret := required "ownVaultStore.tokenSecret is required" .Values.ownVaultStore.tokenSecret }}
 {{- $apiKeySecret := required "ownVaultStore.tokenRefresh.apiKeySecret is required" $refresh.apiKeySecret }}
 {{- if eq $tokenSecret $apiKeySecret }}
@@ -30,8 +33,11 @@ metadata:
     {{- include "workerra.labels" . | nindent 4 }}
 automountServiceAccountToken: false
 ---
-# Only the token Secret, only get/patch: no list, no create, no other Secret.
-# The API key Secret is mounted by the kubelet, so it needs no API access.
+# Only the token Secret, only get/patch: no list, watch, create or delete, and
+# no other Secret. `get` is needed because `kubectl patch` reads the object
+# before it sends the PATCH (traced with the pinned kubectl 1.30.2: GET then
+# PATCH on secrets/<name>; without get it fails Forbidden). The API key Secret
+# is mounted by the kubelet, so it needs no API access.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -105,7 +111,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: refresh
-              image: "{{ $refresh.image.repository }}:{{ $refresh.image.tag }}"
+              image: "{{ $refresh.image.repository }}:{{ $refresh.image.tag }}@{{ $refresh.image.digest }}"
               imagePullPolicy: IfNotPresent
               command: ["/bin/sh", "/script/refresh.sh"]
               env:

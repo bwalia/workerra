@@ -49,13 +49,19 @@ ownVaultStore:
     apiKeySecret: workerra-vault-apikey
     # Policy names the API key must carry, exactly.
     expectedPolicies: []
-    # Inside the one-hour token lifetime, with room for one failed run.
-    schedule: "*/30 * * * *"
+    # Three runs per one-hour token: one run can fail and the token still has
+    # ~40 minutes left, so ESO keeps working through a single bad run.
+    schedule: "*/20 * * * *"
     suspend: false
     maxAttempts: 5
     image:
       repository: alpine/k8s
       tag: 1.30.2
+      # Required: the job holds the API key, so it runs only by digest. This is
+      # the multi-arch index for alpine/k8s:1.30.2 (Docker Hub registry, Hub
+      # API and the image wslvpn/wslvault-token-refresh runs all agree). To
+      # change it: docker buildx imagetools inspect alpine/k8s:<tag>.
+      digest: sha256:cd560fce90f76d2da46bce0624b65258c45ab3350f7073d6722fa74c7b3a3601
 vaultSecrets:
   # NEBULA_API_KEY, OPSAPI_URL, OPSAPI_NAMESPACE, OPSAPI_API_KEY, SESSION_SECRET, ...
   core: workerra/int/core
