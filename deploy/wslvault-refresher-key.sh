@@ -49,11 +49,16 @@ if kubectl -n "$NS" get secret "$SECRET" >/dev/null 2>&1; then
   echo "secret $NS/$SECRET already exists; delete it first to replace it"; exit 0
 fi
 
-# post PATH JSON [HEADER] -> "<body>\n<status>"; the body goes on stdin.
+# post PATH JSON [HEADER] -> "<body>\n<status>". The body goes on stdin and the
+# credential header through a curl config on a pipe (printf is a builtin), so
+# neither is ever in a process's argv.
 post() {
   printf '%s' "$2" | curl -s -m 20 -w '\n%{http_code}' -X POST \
-    -H 'Content-Type: application/json' ${3:+-H "$3"} --data-binary @- "$VAULT$1"
+    -K <(printf 'header = "%s"\n' "${3:-Accept: application/json}") \
+    -H 'Content-Type: application/json' --data-binary @- "$VAULT$1"
 }
+# Wrap a secret as {"<field>": "<secret>"} from stdin, never argv.
+as_json() { jq -Rsc --arg f "$1" '{($f): .}'; }
 body() { sed '$d' <<<"$1"; }
 status() { tail -1 <<<"$1"; }
 # Describe a response without any secret-bearing field.
@@ -68,12 +73,12 @@ fi
 
 case "$CRED" in
   wslv_*)
-    R=$(post /v1/auth/api-key "$(jq -nc --arg k "$CRED" '{api_key:$k}')"); unset CRED
+    R=$(post /v1/auth/api-key "$(printf '%s' "$CRED" | as_json api_key)"); unset CRED
     [ "$(status "$R")" = 200 ] || { echo "sign-in failed: HTTP $(status "$R") $(safe "$R")" >&2; exit 1; }
     if [ "$(body "$R" | jq -r '.mfa_required // false')" = true ]; then
       CODE="${WSLVAULT_TOTP:-}"
       [ -n "$CODE" ] || read -r -p "authenticator code: " CODE </dev/tty
-      R=$(post /v1/auth/mfa/totp "$(jq -nc --arg c "$(body "$R" | jq -r .challenge)" --arg t "$CODE" '{challenge:$c,code:$t}')")
+      R=$(post /v1/auth/mfa/totp "$(printf '%s\n%s' "$(body "$R" | jq -r .challenge)" "$CODE" | jq -Rsc 'split("\n") | {challenge: .[0], code: .[1]}')")
       [ "$(status "$R")" = 200 ] || { echo "code refused: HTTP $(status "$R") $(safe "$R")" >&2; exit 1; }
     fi
     signed_in=$(body "$R" | jq -r '.tenant_id // empty')
@@ -99,7 +104,7 @@ ID=$(body "$R" | jq -r '.id // empty'); unset R
 case "$KEY" in wslv_*) ;; *) echo "::error::no key in the response" >&2; exit 1;; esac
 
 # Check what was actually created before it goes anywhere.
-C=$(post /v1/auth/api-key "$(jq -nc --arg k "$KEY" '{api_key:$k}')")
+C=$(post /v1/auth/api-key "$(printf '%s' "$KEY" | as_json api_key)")
 got_tenant=$(body "$C" | jq -r '.tenant_id // empty')
 got_mfa=$(body "$C" | jq -r '.mfa_required // false')
 got_policies=$(body "$C" | jq -c '.policies // []'); unset C

@@ -4,7 +4,8 @@
 #
 # Tests for Workerra's WSLVault token refresher: the CronJob script
 # (deploy/helm/workerra/files/vault-token-refresh.sh), the key script
-# (deploy/wslvault-refresher-key.sh) and the chart template. Offline: curl and
+# (deploy/wslvault-refresher-key.sh), the seed script (deploy/vault-seed.sh)
+# and the chart template. Offline: curl and
 # kubectl are stubs, nothing reaches WSLVault or a cluster.
 #
 # Needs sh, bash, jq, helm. Usage: scripts/test-vault-token-refresh.sh
@@ -14,6 +15,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CHART="$ROOT/deploy/helm/workerra"
 REFRESH="$CHART/files/vault-token-refresh.sh"
 KEYSCRIPT="$ROOT/deploy/wslvault-refresher-key.sh"
+SEEDSCRIPT="$ROOT/deploy/vault-seed.sh"
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
@@ -22,6 +24,7 @@ b64url() { base64 | tr -d '=\n' | tr '/+' '_-'; }
 API_KEY="wslv_$(printf 'refresher-test-key' | b64url)"
 NEW_KEY="wslv_$(printf 'minted-test-key' | b64url)"
 ADMIN_TOKEN="bootstrap-$(printf 'admin-test' | b64url)"
+VAULT_TEST_TOKEN="vt-$(printf 'seed-test-token' | b64url)"
 JWT="$(printf '{"alg":"none"}' | b64url).$(printf '{"sub":"test"}' | b64url).$(printf 'fake' | b64url)"
 TENANT=01a1ac98-0000-7000-8000-000000000001
 OTHER=01a0f39f-0000-7000-8000-000000000002
@@ -33,8 +36,8 @@ bad() { failures=$((failures + 1)); echo "FAIL $*"; }
 
 # No credential in the output or in any stub's argv.
 no_leak() {
-  if grep -q -e "$API_KEY" -e "$NEW_KEY" -e "$ADMIN_TOKEN" -e "$JWT" -e eyJ "$T/out"; then bad "$1: credential in output"; else ok "$1: no credential in output"; fi
-  if [ -f "$T/argv" ] && grep -q -e "$API_KEY" -e "$NEW_KEY" -e "$JWT" "$T/argv"; then bad "$1: credential in argv"; else ok "$1: no credential in argv"; fi
+  if grep -q -e "$API_KEY" -e "$NEW_KEY" -e "$ADMIN_TOKEN" -e "$VAULT_TEST_TOKEN" -e "$JWT" -e eyJ "$T/out"; then bad "$1: credential in output"; else ok "$1: no credential in output"; fi
+  if [ -f "$T/argv" ] && grep -q -e "$API_KEY" -e "$NEW_KEY" -e "$ADMIN_TOKEN" -e "$VAULT_TEST_TOKEN" -e "$JWT" "$T/argv"; then bad "$1: credential in argv"; else ok "$1: no credential in argv"; fi
 }
 
 # ---- refresher -------------------------------------------------------------
@@ -130,8 +133,12 @@ mkdir -p "$T/kbin"
 cat >"$T/kbin/curl" <<'STUB'
 #!/bin/sh
 echo "$*" >>"$T/argv"
-url=
-for a in "$@"; do case "$a" in http*) url=$a ;; esac; done
+url= prev=
+for a in "$@"; do
+  [ "$prev" = -K ] && cat "$a" >>"$T/headers"
+  case "$a" in http*) url=$a ;; esac
+  prev=$a
+done
 body=$(cat)
 case "$url" in
   */v1/auth/api-key)
@@ -162,7 +169,7 @@ chmod +x "$T/kbin/"*
 run_key() {
   scen=$1
   cred=$2
-  rm -f "$T/argv" "$T/stored_key" "$T/create_args" "$T/mint.json"
+  rm -f "$T/argv" "$T/headers" "$T/stored_key" "$T/create_args" "$T/mint.json"
   rc=0
   env PATH="$T/kbin:$PATH" T="$T" SCEN="$scen" NEW_KEY="$NEW_KEY" JWT="$JWT" TENANT="$TENANT" OTHER="$OTHER" \
     WSLVAULT_ADMIN_CREDENTIAL="$cred" bash "$KEYSCRIPT" >"$T/out" 2>&1 </dev/null || rc=$?
@@ -175,6 +182,8 @@ grep -q -- "-n int create secret generic workerra-vault-apikey --from-file=api_k
   ok "key ok: int/workerra-vault-apikey with api_key and tenant_id" || bad "key ok: wrong create: $(cat "$T/create_args")"
 jq -e --arg t "$TENANT" '.tenant_id == $t and .policies == ["workerra-read"] and .mfa_required == false' "$T/mint.json" >/dev/null &&
   ok "key ok: mints workerra-read, no MFA, in the tenant" || bad "key ok: mint request $(cat "$T/mint.json")"
+grep -qx "header = \"X-Admin-Token: $ADMIN_TOKEN\"" "$T/headers" &&
+  ok "key ok: admin token sent as a header from a curl config" || bad "key ok: admin token header not sent"
 no_leak "key ok"
 
 key_refused() {
@@ -193,6 +202,55 @@ key_refused otheradmin "$API_KEY" "can only create keys in its own tenant"
 run_key exists "$ADMIN_TOKEN"
 [ "$rc" -eq 0 ] && grep -q "already exists" "$T/out" && [ ! -f "$T/mint.json" ] &&
   ok "key exists: leaves the existing Secret, mints nothing" || bad "key exists: $(tail -1 "$T/out")"
+
+# ---- seed script -----------------------------------------------------------
+mkdir -p "$T/sbin"
+cat >"$T/sbin/curl" <<'STUB'
+#!/bin/sh
+echo "$*" >>"$T/argv"
+out= url= prev= method=GET hdr=
+for a in "$@"; do
+  case "$prev" in -o) out=$a ;; -X) method=$a ;; -K) hdr=$(cat "$a") ;; esac
+  case "$a" in http*) url=$a ;; esac
+  prev=$a
+done
+[ "$hdr" = "header = \"X-Vault-Token: $VAULT_TEST_TOKEN\"" ] || { echo '{}' >"$out"; printf 403; exit 0; }
+case "$url" in */v1/kv/data/workerra/int/core) ;; *) echo '{}' >"$out"; printf 404; exit 0 ;; esac
+if [ "$method" = POST ]; then
+  cat >"$T/seed_write.json"
+  printf '{"data":{"version":%s}}' "$(( $(jq -r .options.cas "$T/seed_write.json") + 1 ))" >"$out"; printf 200
+else
+  case "$SCEN" in
+    new) echo '{}' >"$out"; printf 404 ;;
+    *) printf '{"data":{"data":{"SESSION_SECRET":"%s","OTHER_KEY":"keep-me"},"metadata":{"version":4}}}' \
+         "$(printf 'x%.0s' $(seq 1 64))" >"$out"; printf 200 ;;
+  esac
+fi
+STUB
+chmod +x "$T/sbin/curl"
+
+run_seed() {
+  rm -f "$T/argv" "$T/seed_write.json"
+  rc=0
+  env PATH="$T/sbin:$PATH" T="$T" SCEN="$1" VAULT_TEST_TOKEN="$VAULT_TEST_TOKEN" VAULT_TOKEN="$VAULT_TEST_TOKEN" \
+    CONTACT_EMAIL="${2:-}" bash "$SEEDSCRIPT" "${3:-int}" >"$T/out" 2>&1 </dev/null || rc=$?
+}
+
+echo "== seed script (vault-seed.sh)"
+run_seed existing team@workerra.uk
+[ "$rc" -eq 0 ] && jq -e '.options.cas == 4 and .data.OTHER_KEY == "keep-me" and (.data.SESSION_SECRET | length) == 64
+    and .data.CONTACT_EMAIL == "team@workerra.uk"' "$T/seed_write.json" >/dev/null &&
+  ok "seed existing: keeps other keys and SESSION_SECRET, adds CONTACT_EMAIL, cas on version read" ||
+  bad "seed existing (rc=$rc): $(tail -2 "$T/out")"
+no_leak "seed existing"
+run_seed existing
+[ "$rc" -eq 0 ] && [ ! -f "$T/seed_write.json" ] && grep -q "up to date" "$T/out" &&
+  ok "seed unchanged: writes nothing" || bad "seed unchanged (rc=$rc): $(tail -2 "$T/out")"
+run_seed new
+[ "$rc" -eq 0 ] && jq -e '.options.cas == 0 and (.data.SESSION_SECRET | length) == 64' "$T/seed_write.json" >/dev/null &&
+  ok "seed new: creates with cas 0 and a generated SESSION_SECRET" || bad "seed new (rc=$rc): $(tail -2 "$T/out")"
+run_seed existing "" prod
+[ "$rc" -eq 2 ] && [ ! -f "$T/argv" ] && ok "seed prod: refused before any request" || bad "seed prod: rc=$rc"
 
 # ---- chart -----------------------------------------------------------------
 echo "== chart"

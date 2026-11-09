@@ -251,18 +251,24 @@ WSLVault console is getting your admin key, if you don't already have it.
    policy). Use bash, and keep the same terminal for steps 1–2: the token
    lasts an hour.
 
+   Credentials are typed at hidden prompts and reach `curl` on stdin or through
+   a `-K` config on a pipe (`printf` is a bash builtin), never on a command
+   line, where any local user could read them in the process list.
+
    ```bash
    export KUBECONFIG=~/.kube/k3s1.yaml VAULT_ADDR=https://vault.workstation.co.uk
+   vh() { printf 'header = "X-Vault-Token: %s"\n' "$VAULT_TOKEN"; }          # Vault token header
+   bh() { printf 'header = "Authorization: Bearer %s"\n' "$VAULT_TOKEN"; }   # same token, policy API
    read -rs -p "Workerra-int-tenant admin key (wslv_...): " K; echo
-   R=$(jq -nc --arg k "$K" '{api_key:$k}' | curl -fsS -X POST "$VAULT_ADDR/v1/auth/api-key" \
+   R=$(printf '%s' "$K" | jq -Rsc '{api_key: .}' | curl -fsS -X POST "$VAULT_ADDR/v1/auth/api-key" \
      -H 'Content-Type: application/json' --data-binary @-); unset K
    echo "$R" | jq '{mfa_required, tenant_id, policies}'
    # If mfa_required is true:
    #   read -r -p "code: " C
-   #   R=$(echo "$R" | jq -c --arg c "$C" '{challenge, code:$c}' | curl -fsS -X POST \
-   #     "$VAULT_ADDR/v1/auth/mfa/totp" -H 'Content-Type: application/json' --data-binary @-)
+   #   R=$({ echo "$R"; printf '%s' "$C" | jq -Rs .; } | jq -sc '{challenge: .[0].challenge, code: .[1]}' | curl -fsS -X POST \
+   #     "$VAULT_ADDR/v1/auth/mfa/totp" -H 'Content-Type: application/json' --data-binary @-); unset C
    export VAULT_TOKEN=$(echo "$R" | jq -r .token); unset R
-   TENANT=$(curl -fsS "$VAULT_ADDR/v1/auth/token/lookup-self" -H "X-Vault-Token: $VAULT_TOKEN" | jq -r .data.meta.tenant_id)
+   TENANT=$(curl -fsS "$VAULT_ADDR/v1/auth/token/lookup-self" -K <(vh) | jq -r .data.meta.tenant_id)
    echo "tenant: $TENANT"   # must be Workerra-int-tenant's id
    ```
 
@@ -272,19 +278,38 @@ WSLVault console is getting your admin key, if you don't already have it.
    ```bash
    read -r -p "CONTACT_EMAIL: " CONTACT_EMAIL; export CONTACT_EMAIL
    deploy/vault-seed.sh int
-   curl -fsS "$VAULT_ADDR/v1/kv/data/workerra/int/core" -H "X-Vault-Token: $VAULT_TOKEN" | jq '.data.data | keys'
+   curl -fsS "$VAULT_ADDR/v1/kv/data/workerra/int/core" -K <(vh) | jq '.data.data | keys'
    ```
 
-2. **Create the read-only policy** (needs the tenant's `admin` policy, which
-   step 0's key has), then read it back:
+2. **Create the read-only policy** (needs the tenant's `admin` or `root` policy,
+   which step 0's key has). WSLVault keys policies by (tenant, name) and takes
+   the tenant from the caller's token, so this only ever touches
+   Workerra-int-tenant. `PUT` silently replaces an existing policy, so look
+   first: create it only if it is missing, and stop if a `workerra-read` with
+   other rules is already there. Then read it back: a failed database write
+   can still answer 200.
 
    ```bash
-   curl -fsS -X PUT "$VAULT_ADDR/v1/policies/workerra-read" \
-     -H "Authorization: Bearer $VAULT_TOKEN" -H 'Content-Type: application/json' \
-     -d '{"name":"workerra-read","rules":[{"paths":["secret/data/workerra/int/**"],"capabilities":["read"]}]}'
-   curl -fsS "$VAULT_ADDR/v1/policies/workerra-read" -H "Authorization: Bearer $VAULT_TOKEN" | jq .
+   WANT='{"name":"workerra-read","rules":[{"paths":["secret/data/workerra/int/**"],"capabilities":["read"]}]}'
+   code=$(curl -sS -o /tmp/workerra-read.json -w '%{http_code}' "$VAULT_ADDR/v1/policies/workerra-read" -K <(bh))
+   case "$code" in
+     404) printf '%s' "$WANT" | curl -fsS -X PUT "$VAULT_ADDR/v1/policies/workerra-read" -K <(bh) \
+            -H 'Content-Type: application/json' --data-binary @- >/dev/null && echo created ;;
+     200) jq -e --argjson w "$WANT" '.rules == $w.rules' /tmp/workerra-read.json >/dev/null \
+            && echo "already there, same rules" || echo "STOP: workerra-read exists with other rules" ;;
+     *) echo "STOP: HTTP $code" ;;
+   esac
+   sleep 6   # every policy-engine replica reloads from the database within ~5s
+   curl -fsS "$VAULT_ADDR/v1/policies/workerra-read" -K <(bh) | jq -e --argjson w "$WANT" '.rules == $w.rules' \
+     && echo "workerra-read verified"
+   rm -f /tmp/workerra-read.json
    unset VAULT_TOKEN
    ```
+
+   `secret/data/workerra/int/**` matches every path under `workerra/int/`
+   (`core`, `opsapi`, deeper ones) and `workerra/int` itself, and nothing in
+   `workerra/test`, `workerra/int-*` or any other tenant. `read` allows only GET
+   of secret data: no write, delete, list, metadata, policy or key management.
 
 3. **Make sure the token Secret exists.** The refresher can only patch it. It
    exists on INT already; this creates it, empty, only if it is missing:
