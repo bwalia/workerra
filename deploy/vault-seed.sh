@@ -33,8 +33,11 @@ fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# The token reaches curl through a config on a pipe (printf is a builtin),
+# never in argv, where any local user could see it in the process list.
+auth() { printf 'header = "X-Vault-Token: %s"\n' "$VAULT_TOKEN"; }
 
-code=$(curl -sS -o "$tmp/current.json" -w '%{http_code}' -H "X-Vault-Token: $VAULT_TOKEN" "$url")
+code=$(curl -sS -o "$tmp/current.json" -w '%{http_code}' -K <(auth) "$url")
 case "$code" in
   200) ;;
   404) echo '{"data":{"data":{},"metadata":{"version":0}}}' > "$tmp/current.json" ;;
@@ -62,7 +65,7 @@ if jq -e --slurpfile cur "$tmp/current.json" '.data == $cur[0].data.data' "$tmp/
 fi
 
 code=$(curl -sS -o "$tmp/write.json" -w '%{http_code}' -X POST \
-  -H "X-Vault-Token: $VAULT_TOKEN" -H 'Content-Type: application/json' \
+  -K <(auth) -H 'Content-Type: application/json' \
   --data-binary @- "$url" < "$tmp/body.json")
 [ "$code" = 200 ] || { echo "writing $url failed: HTTP $code $(head -c 300 "$tmp/write.json")" >&2; exit 1; }
 

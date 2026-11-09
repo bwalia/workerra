@@ -1,0 +1,144 @@
+{{- /*
+  The shared WSLVault token refresher (wslvpn/deploy/environments/k3s1/
+  wslvault-store.yaml) for Workerra's own tenant: same schedule, image, RBAC,
+  pod security, retries and flow. Only the names differ, the expected tenant
+  comes from the API key Secret (Workerra's repo carries no tenant ids), and
+  it is a Helm template because Workerra shares the ring namespace.
+
+  External Secrets can only use a pre-issued WSLVault JWT, which lasts an hour,
+  so the CronJob trades the machine API key in Secret <apiKeySecret> for a
+  fresh one every 30 minutes and patches it into <ownVaultStore.tokenSecret>.
+  Neither Secret is in the chart: re-applying an empty token would wipe the
+  live one, and the key is created out of band by deploy/wslvault-refresher-key.sh.
+*/}}
+{{- $refresh := .Values.ownVaultStore.tokenRefresh }}
+{{- if $refresh.enabled }}
+{{- if not .Values.ownVaultStore.enabled }}
+{{- fail "ownVaultStore.tokenRefresh.enabled needs ownVaultStore.enabled" }}
+{{- end }}
+{{- if not (hasPrefix "https://" .Values.ownVaultStore.server) }}
+{{- fail "ownVaultStore.server must be an https:// URL" }}
+{{- end }}
+{{- $tokenSecret := required "ownVaultStore.tokenSecret is required" .Values.ownVaultStore.tokenSecret }}
+{{- $apiKeySecret := required "ownVaultStore.tokenRefresh.apiKeySecret is required" $refresh.apiKeySecret }}
+{{- if eq $tokenSecret $apiKeySecret }}
+{{- fail "ownVaultStore.tokenRefresh.apiKeySecret must differ from ownVaultStore.tokenSecret" }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+automountServiceAccountToken: true
+---
+# Get and patch one named Secret. Nothing else: it cannot read the API key
+# through the API (that is a mounted file), nor any other Secret. `get` is
+# needed: kubectl patch GETs the object before it PATCHes it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $tokenSecret | quote }}]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: workerra-vault-token-refresh
+subjects:
+  - kind: ServiceAccount
+    name: workerra-vault-token-refresh
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+data:
+  refresh.sh: |-
+{{ .Files.Get "files/vault-token-refresh.sh" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: workerra-vault-token-refresh
+  labels:
+    {{- include "workerra.labels" . | nindent 4 }}
+    app.kubernetes.io/name: workerra-vault-token-refresh
+spec:
+  # Tokens last an hour; refreshing every 30 minutes leaves one failed run of
+  # headroom before the store notices.
+  schedule: {{ $refresh.schedule | quote }}
+  suspend: {{ $refresh.suspend }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            {{- include "workerra.labels" . | nindent 12 }}
+            app.kubernetes.io/name: workerra-vault-token-refresh
+        spec:
+          serviceAccountName: workerra-vault-token-refresh
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            # The key file is mounted group-owned by this, so the non-root
+            # user can read it; nothing else in the pod is.
+            fsGroup: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: refresh
+              image: "{{ $refresh.image.repository }}:{{ $refresh.image.tag }}"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              command: ["/bin/sh", "/script/refresh.sh"]
+              env:
+                - { name: VAULT_ADDR, value: {{ .Values.ownVaultStore.server | quote }} }
+                - { name: NAMESPACE, value: {{ .Release.Namespace | quote }} }
+                - { name: TARGET_SECRET, value: {{ $tokenSecret | quote }} }
+                - { name: HOME, value: /work }
+              volumeMounts:
+                - { name: key, mountPath: /key, readOnly: true }
+                - { name: script, mountPath: /script, readOnly: true }
+                - { name: work, mountPath: /work }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { memory: 128Mi }
+          volumes:
+            - name: key
+              secret:
+                secretName: {{ $apiKeySecret | quote }}
+                # Owner root, group fsGroup: 0400 would be root-only, which the
+                # non-root refresher cannot read.
+                defaultMode: 0440
+            - name: script
+              configMap:
+                name: workerra-vault-token-refresh
+                defaultMode: 0444
+            # In memory: the token never touches a node's disk.
+            - name: work
+              emptyDir: { medium: Memory, sizeLimit: 1Mi }
+{{- end }}

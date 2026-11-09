@@ -30,13 +30,29 @@ port: 3000
 vaultStore: wslvault-backend
 # Optional Workerra-only Vault tenant. When enabled, the chart creates a
 # namespaced SecretStore `workerra-vault` that authenticates with the token in
-# Secret <tokenSecret> (key `token`) in the ring namespace, and every Workerra
-# ExternalSecret reads through it instead of the shared vaultStore. Create that
-# Secret by hand before enabling (docs/environments.md, "Secrets"); the token
-# should be read-only on kv/data/workerra/* in the tenant.
+# Secret <tokenSecret> (key `token`, a WSLVault session JWT) in the ring
+# namespace, and every Workerra ExternalSecret reads through it instead of the
+# shared vaultStore. Create that Secret by hand before enabling; with
+# tokenRefresh on, the chart keeps it fresh (docs/environments.md, "Secrets").
 ownVaultStore:
   enabled: false
+  server: https://vault.workstation.co.uk
   tokenSecret: workerra-vault-token
+  # WSLVault session JWTs last one hour, so tokenRefresh adds the shared
+  # refresher CronJob (templates/vault-token-refresh.yaml, same as
+  # wslvpn/wslvault-token-refresh): every 30 minutes it trades the machine API
+  # key in Secret <apiKeySecret> (keys `api_key` and `tenant_id`, created by
+  # deploy/wslvault-refresher-key.sh) for a fresh token and patches it into
+  # <tokenSecret>. Setup and recovery: docs/environments.md, "Secrets".
+  tokenRefresh:
+    enabled: false
+    apiKeySecret: workerra-vault-apikey
+    schedule: "*/30 * * * *"
+    suspend: false
+    # The image the shared refresher runs.
+    image:
+      repository: alpine/k8s
+      tag: 1.30.2
 vaultSecrets:
   # NEBULA_API_KEY, OPSAPI_URL, OPSAPI_NAMESPACE, OPSAPI_API_KEY, SESSION_SECRET, ...
   core: workerra/int/core
